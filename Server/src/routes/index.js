@@ -4,6 +4,8 @@ const router = express.Router();
 
 const userRoutes = require('./auth.routes');
 const healthcareRoutes = require('./healthcare.routes');
+const mediaRoutes = require('./media.routes');
+
 // Temporarily comment out other routes to isolate the error
 // const educationRoutes = require('./educationRoutes');
 // const itRoutes = require('./it.routes');
@@ -18,6 +20,7 @@ router.get('/health', (req, res) => {
 // Mount routes
 router.use('/users', userRoutes);
 router.use('/healthcare', healthcareRoutes);
+router.use('/media', mediaRoutes);
 // router.use('/education', educationRoutes);
 // router.use('/it', itRoutes);
 // router.use('/agriculture', agricultureRoutes);
