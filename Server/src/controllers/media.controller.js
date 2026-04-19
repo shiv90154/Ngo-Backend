@@ -3,6 +3,7 @@ const Like = require('../models/Like');
 const Comment = require('../models/Comment');
 const Follow = require('../models/Follow');
 const User = require('../models/user.model');
+const Notification = require('../models/Notification'); // 🆕 imported
 const path = require('path');
 const fs = require('fs').promises;
 
@@ -10,6 +11,24 @@ const uploadDir = path.join(__dirname, '../uploads/media');
 (async () => {
   await fs.mkdir(uploadDir, { recursive: true });
 })();
+
+// 🆕 Helper: Create a notification (silent fail – won't break the main operation)
+const createNotification = async ({ recipient, sender, type, post, comment }) => {
+  try {
+    // Don't notify if sender is the recipient
+    if (recipient.toString() === sender.toString()) return;
+
+    await Notification.create({
+      recipient,
+      sender,
+      type,
+      post,
+      comment,
+    });
+  } catch (error) {
+    console.error('Failed to create notification:', error);
+  }
+};
 
 // ======================
 // POST CRUD
@@ -135,6 +154,8 @@ exports.deletePost = async (req, res) => {
     // Delete associated likes and comments
     await Like.deleteMany({ post: post._id });
     await Comment.deleteMany({ post: post._id });
+    // 🆕 Delete related notifications
+    await Notification.deleteMany({ post: post._id });
 
     // Update user's post count
     await User.findByIdAndUpdate(post.author, {
@@ -232,7 +253,7 @@ exports.likePost = async (req, res) => {
     const postId = req.params.id;
     const userId = req.user.id;
 
-    const post = await MediaPost.findById(postId);
+    const post = await MediaPost.findById(postId).populate('author');
     if (!post) {
       return res.status(404).json({ success: false, message: 'Post not found' });
     }
@@ -245,6 +266,14 @@ exports.likePost = async (req, res) => {
     await Like.create({ post: postId, user: userId });
     post.likesCount += 1;
     await post.save();
+
+    // 🆕 Create notification for post author
+    await createNotification({
+      recipient: post.author._id,
+      sender: userId,
+      type: 'like',
+      post: postId,
+    });
 
     res.json({ success: true, likesCount: post.likesCount });
   } catch (error) {
@@ -292,7 +321,7 @@ exports.addComment = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Comment text is required' });
     }
 
-    const post = await MediaPost.findById(postId);
+    const post = await MediaPost.findById(postId).populate('author');
     if (!post) {
       return res.status(404).json({ success: false, message: 'Post not found' });
     }
@@ -305,6 +334,15 @@ exports.addComment = async (req, res) => {
 
     post.commentsCount += 1;
     await post.save();
+
+    // 🆕 Create notification for post author
+    await createNotification({
+      recipient: post.author._id,
+      sender: userId,
+      type: 'comment',
+      post: postId,
+      comment: comment._id,
+    });
 
     await comment.populate('user', 'fullName profileImage');
 
@@ -400,6 +438,13 @@ exports.followUser = async (req, res) => {
     });
     await User.findByIdAndUpdate(targetUserId, {
       $inc: { 'mediaCreatorProfile.totalFollowers': 1 },
+    });
+
+    // 🆕 Create notification for the user being followed
+    await createNotification({
+      recipient: targetUserId,
+      sender: followerId,
+      type: 'follow',
     });
 
     res.json({ success: true, message: 'Followed successfully' });

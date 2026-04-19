@@ -5,8 +5,9 @@ const router = express.Router();
 const userRoutes = require('./auth.routes');
 const healthcareRoutes = require('./healthcare.routes');
 const mediaRoutes = require('./media.routes');
+const notificationRoutes = require('./notification.routes'); // 🆕 added
 
-// Temporarily comment out other routes to isolate the error
+// Other route modules
 const educationRoutes = require('./educationRoutes');
 const itRoutes = require('./it.routes');
 const agricultureRoutes = require('./agriculture.routes');
@@ -21,6 +22,7 @@ router.get('/health', (req, res) => {
 router.use('/users', userRoutes);
 router.use('/healthcare', healthcareRoutes);
 router.use('/media', mediaRoutes);
+router.use('/notifications', notificationRoutes); // 🆕 added
 router.use('/education', educationRoutes);
 router.use('/it', itRoutes);
 router.use('/agriculture', agricultureRoutes);
