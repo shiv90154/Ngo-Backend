@@ -76,6 +76,7 @@ exports.register = async (req, res) => {
       commissionRate,
       isMediaCreator,
       isSeller, storeName, gstNumber,
+      developedBy, testedBy, qaStatus
     } = req.body;
 
     const finalName = fullName || name;
@@ -140,6 +141,21 @@ exports.register = async (req, res) => {
       sponsorId: sponsorId || null,
       createdBy: req.user ? req.user.id : null,
       updatedBy: req.user ? req.user.id : null,
+      // New fields initialization
+      aiUsage: {
+        diseaseDetectionCount: 0,
+        cropDetectionCount: 0,
+        aiTokensRemaining: 10,
+      },
+      mlmPayoutInfo: {
+        pendingCommission: 0,
+        totalWithdrawn: 0,
+      },
+      twoFactorEnabled: false,
+      isDeleted: false,
+      developedBy: developedBy || null,
+      testedBy: testedBy || null,
+      qaStatus: qaStatus || 'pending',
     };
 
     // Teacher profile
@@ -208,6 +224,7 @@ exports.register = async (req, res) => {
     if (userModules.includes('MEDIA') || isMediaCreator === 'true' || isMediaCreator === true) {
       userData.mediaCreatorProfile = {
         isCreator: true,
+        creatorStatus: 'pending',
         totalPosts: 0,
         totalFollowers: 0,
         monetizationEarnings: 0,
@@ -350,22 +367,52 @@ exports.resendOTP = async (req, res) => {
 // ======================
 // LOGIN
 // ======================
+// ======================
+// LOGIN (with debug)
+// ======================
 exports.login = async (req, res) => {
+  console.log('>>> Login endpoint hit');
   try {
     const { email, password } = req.body;
+    console.log('>>> Email:', email);
+
     if (!email || !password) {
+      console.log('>>> Missing credentials');
       return res.status(400).json({ success: false, message: 'Email and password required' });
     }
+
+    console.log('>>> Finding user...');
     const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user) {
+      console.log('>>> User not found');
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    console.log('>>> User found:', user._id);
+
+    if (user.isDeleted) {
+      console.log('>>> User is soft deleted');
+      return res.status(403).json({ success: false, message: 'Account is deactivated' });
+    }
+
     if (!user.isVerified) {
+      console.log('>>> User not verified');
       return res.status(403).json({ success: false, message: 'Please verify your email first' });
     }
+
+    console.log('>>> Comparing password...');
     const isMatch = await user.comparePassword(password);
-    if (!isMatch) return res.status(400).json({ success: false, message: 'Invalid credentials' });
+    if (!isMatch) {
+      console.log('>>> Password mismatch');
+      return res.status(400).json({ success: false, message: 'Invalid credentials' });
+    }
+    console.log('>>> Password matched');
 
+    console.log('>>> Calling updateLastLogin...');
+    console.log('>>> typeof user.updateLastLogin:', typeof user.updateLastLogin);
     await user.updateLastLogin(req.ip, req.headers['user-agent']);
+    console.log('>>> Last login updated');
 
+    console.log('>>> Generating token...');
     const token = jwt.sign(
       { id: user._id, role: user.role, modules: user.modules },
       process.env.JWT_SECRET,
@@ -377,8 +424,11 @@ exports.login = async (req, res) => {
     delete userData.otp;
     delete userData.otpExpire;
 
+    console.log('>>> Login successful, sending response');
     res.json({ success: true, message: 'Login successful', token, user: userData });
   } catch (error) {
+    console.error('>>> LOGIN ERROR:', error);
+    console.error('>>> Error stack:', error.stack);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -461,7 +511,7 @@ exports.resetPassword = async (req, res) => {
 };
 
 // ======================
-// GET PROFILE (FIXED – no broken populate calls)
+// GET PROFILE
 // ======================
 exports.getProfile = async (req, res) => {
   try {
@@ -469,8 +519,6 @@ exports.getProfile = async (req, res) => {
       .select('-password -otp -otpExpire')
       .populate('reportsTo', 'fullName email role')
       .populate('sponsorId', 'fullName email');
-      // All other populate calls removed to prevent 500 errors
-      // Add them back only after you create the corresponding models
 
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     res.json({ success: true, user });
@@ -520,6 +568,25 @@ exports.updateProfile = async (req, res) => {
     ];
     for (const key of simpleFields) {
       if (req.body[key] !== undefined) user[key] = req.body[key];
+    }
+
+    // Update new fields (some admin-only in practice but we allow for completeness)
+    if (req.body.twoFactorEnabled !== undefined) {
+      user.twoFactorEnabled = req.body.twoFactorEnabled === 'true' || req.body.twoFactorEnabled === true;
+    }
+    if (req.body.developedBy !== undefined) user.developedBy = req.body.developedBy;
+    if (req.body.testedBy !== undefined) user.testedBy = req.body.testedBy;
+    if (req.body.qaStatus !== undefined) user.qaStatus = req.body.qaStatus;
+
+    // AI token replenish (admin only)
+    if (req.body.aiTokensRemaining !== undefined && req.user.role === 'SUPER_ADMIN') {
+      user.aiUsage = user.aiUsage || {};
+      user.aiUsage.aiTokensRemaining = parseInt(req.body.aiTokensRemaining);
+    }
+
+    // Media creator status (admin only)
+    if (req.body.creatorStatus !== undefined && req.user.role === 'SUPER_ADMIN' && user.mediaCreatorProfile) {
+      user.mediaCreatorProfile.creatorStatus = req.body.creatorStatus;
     }
 
     if (req.body.emergencyContactName || req.body.emergencyContactRelation || req.body.emergencyContactPhone) {
@@ -589,6 +656,7 @@ exports.updateProfile = async (req, res) => {
       if (isCreator && !user.mediaCreatorProfile) {
         user.mediaCreatorProfile = {
           isCreator: true,
+          creatorStatus: 'pending',
           totalPosts: 0,
           totalFollowers: 0,
           monetizationEarnings: 0,
@@ -715,10 +783,14 @@ exports.getSubordinates = async (req, res) => {
 // ======================
 exports.getAllUsers = async (req, res) => {
   try {
-    const { role, isVerified, page = 1, limit = 20 } = req.query;
+    const { role, isVerified, page = 1, limit = 20, includeDeleted } = req.query;
     const filter = {};
     if (role) filter.role = role;
     if (isVerified !== undefined) filter.isVerified = isVerified === 'true';
+    // By default exclude soft deleted users
+    if (includeDeleted !== 'true') {
+      filter.isDeleted = false;
+    }
 
     const users = await User.find(filter)
       .select('-password -otp -otpExpire')
@@ -756,17 +828,140 @@ exports.getUserById = async (req, res) => {
 };
 
 // ======================
-// DELETE USER (Admin)
+// DELETE USER (Admin) - Soft delete by default
 // ======================
 exports.deleteUser = async (req, res) => {
   try {
-    const user = await User.findByIdAndDelete(req.params.id);
+    const { hardDelete } = req.query;
+    const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (user.profileImage) {
-      const filePath = path.join(__dirname, '../', user.profileImage);
-      await fs.unlink(filePath).catch(() => { });
+
+    if (hardDelete === 'true') {
+      // Permanent delete
+      if (user.profileImage) {
+        const filePath = path.join(__dirname, '../', user.profileImage);
+        await fs.unlink(filePath).catch(() => { });
+      }
+      await User.findByIdAndDelete(req.params.id);
+      res.json({ success: true, message: 'User permanently deleted' });
+    } else {
+      // Soft delete
+      user.isDeleted = true;
+      user.deletedAt = new Date();
+      user.isActive = false;
+      await user.save();
+      res.json({ success: true, message: 'User deactivated (soft delete)' });
     }
-    res.json({ success: true, message: 'User deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// RESTORE USER (Undelete)
+// ======================
+exports.restoreUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    user.isDeleted = false;
+    user.deletedAt = null;
+    user.isActive = true;
+    await user.save();
+    res.json({ success: true, message: 'User restored successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// UPDATE AI TOKENS (Admin)
+// ======================
+exports.updateAITokens = async (req, res) => {
+  try {
+    const { userId, tokens } = req.body;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    user.aiUsage = user.aiUsage || {};
+    user.aiUsage.aiTokensRemaining = parseInt(tokens);
+    await user.save();
+    res.json({ success: true, message: 'AI tokens updated', aiTokens: user.aiUsage.aiTokensRemaining });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// INCREMENT AI USAGE (Internal use)
+// ======================
+exports.incrementAIUsage = async (req, res) => {
+  try {
+    const { type } = req.body; // 'disease' or 'crop'
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    user.aiUsage = user.aiUsage || {};
+    if (type === 'disease') {
+      user.aiUsage.diseaseDetectionCount = (user.aiUsage.diseaseDetectionCount || 0) + 1;
+    } else if (type === 'crop') {
+      user.aiUsage.cropDetectionCount = (user.aiUsage.cropDetectionCount || 0) + 1;
+    }
+    user.aiUsage.lastDetectionAt = new Date();
+    if (user.aiUsage.aiTokensRemaining > 0) {
+      user.aiUsage.aiTokensRemaining -= 1;
+    }
+    await user.save();
+    res.json({ success: true, aiUsage: user.aiUsage });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// ADD SUBSCRIPTION HISTORY
+// ======================
+exports.addSubscriptionHistory = async (req, res) => {
+  try {
+    const { userId, plan, startDate, endDate, amountPaid, transactionId } = req.body;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    user.subscriptionHistory.push({
+      plan,
+      startDate: new Date(startDate),
+      endDate: new Date(endDate),
+      amountPaid,
+      transactionId,
+    });
+    // Also update activeSubscription if it's current
+    user.activeSubscription = {
+      plan,
+      expiresAt: new Date(endDate),
+      autoRenew: user.activeSubscription?.autoRenew || false,
+    };
+    await user.save();
+    res.json({ success: true, message: 'Subscription history added' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// UPDATE MLM PAYOUT INFO
+// ======================
+exports.updateMLMPayout = async (req, res) => {
+  try {
+    const { userId, pendingCommission, totalWithdrawn, lastPayoutDate, nextPayoutDate } = req.body;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    user.mlmPayoutInfo = user.mlmPayoutInfo || {};
+    if (pendingCommission !== undefined) user.mlmPayoutInfo.pendingCommission = pendingCommission;
+    if (totalWithdrawn !== undefined) user.mlmPayoutInfo.totalWithdrawn = totalWithdrawn;
+    if (lastPayoutDate) user.mlmPayoutInfo.lastPayoutDate = new Date(lastPayoutDate);
+    if (nextPayoutDate) user.mlmPayoutInfo.nextPayoutDate = new Date(nextPayoutDate);
+    await user.save();
+    res.json({ success: true, mlmPayoutInfo: user.mlmPayoutInfo });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

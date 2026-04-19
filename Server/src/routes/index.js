@@ -2,55 +2,25 @@
 const express = require('express');
 const router = express.Router();
 
-// User routes (authentication, profile, etc.)
 const userRoutes = require('./auth.routes');
+const healthcareRoutes = require('./healthcare.routes');
+// Temporarily comment out other routes to isolate the error
+// const educationRoutes = require('./educationRoutes');
+// const itRoutes = require('./it.routes');
+// const agricultureRoutes = require('./agriculture.routes');
+// const financeRoutes = require('./finance.routes');
 
-// Education routes (courses, tests, certificates, etc.)
-const educationRoutes = require('./educationRoutes');
-
-// IT Services routes (clients, projects, invoices, service requests)
-const itRoutes = require('./it.routes');
-
-
-const agricultureRoutes = require('./agriculture.routes');
-
-const financeRoutes = require('./finance.routes'); 
-
-// ======================
-// HEALTH CHECK
-// ======================
+// Health check
 router.get('/health', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'API is running',
-    timestamp: new Date().toISOString(),
-  });
+  res.json({ success: true, message: 'API is running' });
 });
 
-// ======================
-// ROOT API INFO
-// ======================
-router.get('/', (req, res) => {
-  res.json({
-    name: 'Samraddh Bharat Foundation API',
-    version: '1.0.0',
-    endpoints: {
-      users: '/api/users',
-      education: '/api/education',
-      it: '/api/it',
-      agriculture: '/api/agriculture',
-      finance: '/api/finance',          // <-- NEW
-    },
-  });
-});
-
-// ======================
-// MOUNT ROUTES
-// ======================
+// Mount routes
 router.use('/users', userRoutes);
-router.use('/education', educationRoutes);
-router.use('/it', itRoutes);
-router.use('/agriculture', agricultureRoutes);
-router.use('/finance', financeRoutes);    // <-- NEW
+router.use('/healthcare', healthcareRoutes);
+// router.use('/education', educationRoutes);
+// router.use('/it', itRoutes);
+// router.use('/agriculture', agricultureRoutes);
+// router.use('/finance', financeRoutes);
 
 module.exports = router;

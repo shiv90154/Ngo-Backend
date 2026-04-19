@@ -18,6 +18,7 @@ const roleLevelMap = {
 
 const userSchema = new mongoose.Schema(
   {
+    // ========== BASIC INFO ==========
     fullName: { type: String, required: [true, 'Full name is required'], trim: true },
     email: {
       type: String,
@@ -113,7 +114,7 @@ const userSchema = new mongoose.Schema(
       qualifications: [String],
       experienceYears: { type: Number, min: 0, default: 0 },
       taughtCourses: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Course' }],
-      earnings: { type: Number, default: 0 }, // Teacher earnings from courses
+      earnings: { type: Number, default: 0 },
     },
     enrolledCourses: [
       {
@@ -220,6 +221,7 @@ const userSchema = new mongoose.Schema(
     // ========== NEWS & MEDIA MODULE ==========
     mediaCreatorProfile: {
       isCreator: { type: Boolean, default: false },
+      creatorStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
       totalPosts: { type: Number, default: 0 },
       totalFollowers: { type: Number, default: 0 },
       monetizationEarnings: { type: Number, default: 0 },
@@ -251,8 +253,43 @@ const userSchema = new mongoose.Schema(
       expiresAt: { type: Date, default: null },
       autoRenew: { type: Boolean, default: false },
     },
+    subscriptionHistory: [
+      {
+        plan: { type: String, enum: ['EDUCATION', 'HEALTH', 'AGRICULTURE', 'NONE'] },
+        startDate: Date,
+        endDate: Date,
+        amountPaid: Number,
+        transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+      },
+    ],
 
-    // ========== AUDIT & SESSION ==========
+    // ========== AI USAGE TRACKING ==========
+    aiUsage: {
+      diseaseDetectionCount: { type: Number, default: 0 },
+      cropDetectionCount: { type: Number, default: 0 },
+      lastDetectionAt: Date,
+      aiTokensRemaining: { type: Number, default: 10 },
+    },
+
+    // ========== MLM PAYOUT INFO ==========
+    mlmPayoutInfo: {
+      lastPayoutDate: Date,
+      nextPayoutDate: Date,
+      pendingCommission: { type: Number, default: 0, min: 0 },
+      totalWithdrawn: { type: Number, default: 0, min: 0 },
+    },
+
+    // ========== SECURITY & AUDIT ==========
+    twoFactorEnabled: { type: Boolean, default: false },
+    isDeleted: { type: Boolean, default: false },
+    deletedAt: Date,
+
+    // ========== DEVELOPER / QA TRACKING ==========
+    developedBy: { type: String, trim: true },
+    testedBy: { type: String, trim: true },
+    qaStatus: { type: String, enum: ['pending', 'passed', 'failed'], default: 'pending' },
+
+    // ========== STANDARD AUDIT FIELDS ==========
     lastLogin: { type: Date, default: null },
     lastLoginIP: { type: String, trim: true, default: null },
     deviceInfo: { type: String, trim: true, default: null },
@@ -269,6 +306,8 @@ userSchema.index({ modules: 1 });
 userSchema.index({ isVerified: 1 });
 userSchema.index({ reportsTo: 1 });
 userSchema.index({ sponsorId: 1 });
+userSchema.index({ hierarchyLevel: 1 });
+userSchema.index({ sponsorId: 1, hierarchyLevel: 1 });
 userSchema.index({ 'doctorProfile.specialization': 1 });
 userSchema.index({ 'teacherProfile.specialization': 1 });
 userSchema.index({ 'farmerProfile.crops': 1 });
@@ -277,16 +316,34 @@ userSchema.index({ 'activeSubscription.expiresAt': 1 });
 userSchema.index({ lastLogin: -1 });
 userSchema.index({ 'mediaCreatorProfile.isCreator': 1 });
 userSchema.index({ 'sellerProfile.isSeller': 1 });
+userSchema.index({ isDeleted: 1 });
 
-// ========== PRE‑SAVE HOOKS ==========
+// ========== STATIC METHOD: Generate Unique Referral Code ==========
+userSchema.statics.generateUniqueReferralCode = async function () {
+  const User = this;
+  let code;
+  let exists;
+  do {
+    code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    exists = await User.exists({ referralCode: code });
+  } while (exists);
+  return code;
+};
+
+// ========== PRE‑SAVE HOOKS (FIXED - No `next` parameter) ==========
 userSchema.pre('save', async function () {
+  // Hash password if modified
   if (this.isModified('password')) {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
   }
-  if (!this.referralCode) {
-    this.referralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+  // Generate unique referral code for new users
+  if (this.isNew && !this.referralCode) {
+    this.referralCode = await this.constructor.generateUniqueReferralCode();
   }
+
+  // Set hierarchyLevel based on role if not provided
   if (this.isNew && !this.hierarchyLevel) {
     this.hierarchyLevel = roleLevelMap[this.role] || 9;
   }
