@@ -935,13 +935,17 @@ const getDashboard = async (req, res, next) => {
         const totalOrders = await Order.countDocuments({
             $or: [{ buyer: req.user.id }, { seller: req.user.id }]
         });
+        const recentCrops = await Crop.find({ user: userId })
+            .sort({ createdAt: -1 })
+            .limit(2);
 
         const stats = {
             totalCrops,
             totalProducts: myProducts,
             totalOrders,
             role: req.user.role,
-            modules: req.user.modules || []
+            modules: req.user.modules || [],
+            recentCrops
         };
 
         res.status(200).json({ success: true, data: { stats } });
