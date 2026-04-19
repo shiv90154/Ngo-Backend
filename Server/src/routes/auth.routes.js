@@ -1,11 +1,22 @@
+// src/routes/auth.routes.js
 const express = require('express');
+console.log('express loaded');
+
 const router = express.Router();
+console.log('router created');
+
 const multer = require('multer');
+console.log('multer loaded');
+
 const path = require('path');
 const fs = require('fs');
 
 const userController = require('../controllers/auth.controller');
-const { protect, restrictTo } = require('../middleware/auth.middleware');
+const { protect, restrictTo } = require('../middleware');
+console.log('protect type:', typeof protect);
+console.log('restrictTo type:', typeof restrictTo);
+console.log('userController loaded, login type:', typeof userController.login);
+console.log('userController keys:', Object.keys(userController));
 
 // Configure multer for temporary file storage
 const storage = multer.diskStorage({
@@ -42,8 +53,6 @@ router.post(
 router.post('/verify-otp', userController.verifyOTP);
 router.post('/resend-otp', userController.resendOTP);
 router.post('/login', userController.login);
-
-// NEW: Forgot password flow
 router.post('/forgot-password', userController.forgotPassword);
 router.post('/verify-reset-otp', userController.verifyResetOtp);
 router.post('/reset-password', userController.resetPassword);
@@ -52,74 +61,67 @@ router.post('/reset-password', userController.resetPassword);
 // PROTECTED ROUTES (Authentication required)
 // ======================
 router.get('/profile', protect, userController.getProfile);
-router.put('/profile', protect, upload.single('profileImage'), userController.updateProfile);
+router.put(
+  '/profile',
+  protect,
+  upload.fields([
+    { name: 'profileImage', maxCount: 1 },
+    { name: 'profilePicture', maxCount: 1 },
+    { name: 'storeLogo', maxCount: 1 },
+  ]),
+  userController.updateProfile
+);
 
+// Subordinates - two separate routes (NO OPTIONAL PARAM)
 router.get('/subordinates', protect, userController.getSubordinates);
 router.get('/subordinates/:id', protect, userController.getSubordinates);
 
 router.post('/wallet', protect, userController.updateWallet);
 
-// ======================
-// HEALTH RECORDS
-// ======================
+// Health Records - two separate routes
+router.post('/health-records', protect, upload.single('file'), userController.addHealthRecord);
 router.post(
-  '/health-records',
-  protect,
-  upload.single('file'),
-  userController.addHealthRecord
-);
-router.post(
-  '/health-records/:userId',
+  '/health-records/user/:userId',
   protect,
   restrictTo('DOCTOR', 'SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
   upload.single('file'),
   userController.addHealthRecord
 );
 
-// ======================
-// AGRICULTURE PRODUCTS (Listings)
-// ======================
-router.post(
-  '/products',
-  protect,
-  upload.single('image'),
-  userController.addProductListing
-);
+// Agriculture Products
+router.post('/products', protect, upload.single('image'), userController.addProductListing);
 
-// ======================
-// CONTRACT FARMING
-// ======================
+// Contract Farming
 router.post('/contract-farming', protect, userController.addContractFarming);
 
-// ======================
-// LOANS
-// ======================
+// Loans - two separate routes
 router.post('/loans', protect, userController.addLoan);
-router.post('/loans/:userId', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.addLoan);
-
-// ======================
-// CRM: CLIENTS
-// ======================
-router.post('/clients', protect, userController.addClient);
-
-// ======================
-// CRM: PROJECTS
-// ======================
-router.post('/projects', protect, userController.addProject);
-
-// ======================
-// E-COMMERCE STORE PRODUCTS
-// ======================
 router.post(
-  '/store-products',
+  '/loans/user/:userId',
   protect,
-  upload.single('image'),
-  userController.addStoreProduct
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  userController.addLoan
 );
 
-// ======================
-// ADMIN ROUTES (User management)
-// ======================
+// CRM Clients
+router.post('/clients', protect, userController.addClient);
+
+// CRM Projects
+router.post('/projects', protect, userController.addProject);
+
+// E-commerce Store Products
+router.post('/store-products', protect, upload.single('image'), userController.addStoreProduct);
+
+// AI, MLM, Subscription
+router.put('/ai/tokens', protect, restrictTo('SUPER_ADMIN'), userController.updateAITokens);
+router.post('/ai/usage', protect, userController.incrementAIUsage);
+router.post('/subscription/history', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.addSubscriptionHistory);
+router.put('/mlm/payout', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.updateMLMPayout);
+
+// Restore user
+router.patch('/:id/restore', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.restoreUser);
+
+// Admin user management - specific routes BEFORE param routes
 router.get('/', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.getAllUsers);
 router.get('/:id', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_OFFICER'), userController.getUserById);
 router.delete('/:id', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.deleteUser);

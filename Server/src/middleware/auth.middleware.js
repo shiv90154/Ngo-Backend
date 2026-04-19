@@ -2,65 +2,49 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/user.model');
 
-// Protect routes - verify JWT and attach user to request
 exports.protect = async (req, res, next) => {
   let token;
-
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+  if (req.headers.authorization?.startsWith('Bearer')) {
     token = req.headers.authorization.split(' ')[1];
   }
 
   if (!token) {
-    return res.status(401).json({
-      success: false,
-      message: 'Not authorized, no token provided'
-    });
+    return res.status(401).json({ success: false, message: 'Not authorized, no token' });
   }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id).select('-password');
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'User not found'
-      });
+    
+    if (!user || user.isDeleted || !user.isActive) {
+      return res.status(401).json({ success: false, message: 'User not found or deactivated' });
     }
 
-    // Attach user to request (both `user` and `user.id` for convenience)
     req.user = user;
-    req.user.id = user._id; // alias for controller usage
-
+    req.user.id = user._id;
     next();
   } catch (err) {
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid or expired token'
-    });
+    return res.status(401).json({ success: false, message: 'Invalid or expired token' });
   }
 };
 
-// Role-based authorization
 exports.authorize = (...roles) => {
   return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Not authenticated'
-      });
-    }
-
+    if (!req.user) return res.status(401).json({ success: false, message: 'Not authenticated' });
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        message: `Role '${req.user.role}' is not authorized to access this route. Allowed roles: ${roles.join(', ')}`
-      });
+      return res.status(403).json({ success: false, message: 'Forbidden' });
     }
-
     next();
   };
 };
 
-// Alias for backward compatibility (used in many routes)
-exports.restrictTo = exports.authorize;
+// ✅ Ensure this is a function that returns a middleware
+exports.restrictTo = (...roles) => {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ success: false, message: 'Not authenticated' });
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+    next();
+  };
+};
