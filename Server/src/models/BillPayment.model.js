@@ -11,4 +11,6 @@ const billPaymentSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+billPaymentSchema.index({ user: 1, createdAt: -1 });
+
 module.exports = mongoose.model('BillPayment', billPaymentSchema);

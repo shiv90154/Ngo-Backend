@@ -16,10 +16,14 @@ const razorpay = new Razorpay({
 // ======================
 // WALLET (RAZORPAY)
 // ======================
+
+// Create order for wallet top‑up
 exports.createWalletOrder = async (req, res) => {
   try {
     const { amount } = req.body;
-    if (!amount || amount < 10) return res.status(400).json({ success: false, message: 'Minimum amount ₹10' });
+    if (!amount || amount < 10) {
+      return res.status(400).json({ success: false, message: 'Minimum amount ₹10' });
+    }
     const order = await razorpay.orders.create({
       amount: amount * 100,
       currency: 'INR',
@@ -32,103 +36,169 @@ exports.createWalletOrder = async (req, res) => {
   }
 };
 
+// Verify Razorpay payment signature (client‑side verification)
+exports.verifyPayment = async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const generatedSignature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(razorpay_order_id + '|' + razorpay_payment_id)
+      .digest('hex');
+    if (generatedSignature !== razorpay_signature) {
+      return res.status(400).json({ success: false, message: 'Invalid signature' });
+    }
+    // The actual crediting is handled by webhook; here we just confirm validity.
+    res.json({ success: true, message: 'Payment verified successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Razorpay webhook – IMPORTANT: must receive raw body (see server.js setup)
 exports.razorpayWebhook = async (req, res) => {
   const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
   const signature = req.headers['x-razorpay-signature'];
-  const body = JSON.stringify(req.body);
+  const body = req.body.toString(); // because we use express.raw()
   const expectedSignature = crypto.createHmac('sha256', secret).update(body).digest('hex');
-  if (signature !== expectedSignature) return res.status(400).send('Invalid signature');
-  const event = req.body;
+  if (signature !== expectedSignature) {
+    return res.status(400).send('Invalid signature');
+  }
+  const event = JSON.parse(body);
   if (event.event === 'payment.captured') {
     const payment = event.payload.payment.entity;
     const userId = payment.notes?.userId;
     if (userId) {
       const amount = payment.amount / 100;
-      const user = await User.findById(userId);
-      if (user) {
-        user.walletBalance += amount;
-        user.totalEarnings += amount;
-        await user.save();
-        await Transaction.create({
-          user: userId,
-          type: 'credit',
-          amount,
-          description: `Wallet top-up via Razorpay (${payment.id})`,
-          referenceId: payment.id,
-          status: 'completed'
-        });
+      const session = await mongoose.startSession();
+      session.startTransaction();
+      try {
+        const user = await User.findById(userId).session(session);
+        if (user) {
+          user.walletBalance += amount;
+          user.totalEarnings += amount;
+          await user.save({ session });
+          await Transaction.create([{
+            user: userId,
+            type: 'credit',
+            amount,
+            description: `Wallet top‑up via Razorpay (${payment.id})`,
+            referenceId: payment.id,
+            status: 'completed'
+          }], { session });
+        }
+        await session.commitTransaction();
+      } catch (err) {
+        await session.abortTransaction();
+        console.error('Webhook transaction error:', err);
+      } finally {
+        session.endSession();
       }
     }
   }
   res.json({ received: true });
 };
 
+// Manual add funds (admin only – restrict in routes)
 exports.addFunds = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
     const { amount, description } = req.body;
-    if (!amount || amount <= 0) return res.status(400).json({ success: false, message: 'Invalid amount' });
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid amount' });
+    }
     const user = await User.findById(req.user.id).session(session);
     user.walletBalance += amount;
     user.totalEarnings += amount;
     await user.save({ session });
     await Transaction.create([{
-      user: req.user.id, type: 'credit', amount, description: description || 'Manual credit', status: 'completed'
+      user: req.user.id, type: 'credit', amount,
+      description: description || 'Manual credit', status: 'completed'
     }], { session });
     await session.commitTransaction();
     res.json({ success: true, data: { balance: user.walletBalance } });
   } catch (error) {
     await session.abortTransaction();
     res.status(500).json({ success: false, message: error.message });
-  } finally { session.endSession(); }
+  } finally {
+    session.endSession();
+  }
 };
 
+// Transfer funds to another user
 exports.transferFunds = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
     const { toUserId, amount, description } = req.body;
-    if (!toUserId || !amount || amount <= 0) return res.status(400).json({ success: false, message: 'Invalid request' });
+    if (!toUserId || !amount || amount <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid request' });
+    }
     const fromUser = await User.findById(req.user.id).session(session);
-    if (fromUser.walletBalance < amount) return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    if (fromUser.walletBalance < amount) {
+      return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    }
     const toUser = await User.findById(toUserId).session(session);
-    if (!toUser) return res.status(404).json({ success: false, message: 'Recipient not found' });
+    if (!toUser) {
+      return res.status(404).json({ success: false, message: 'Recipient not found' });
+    }
     fromUser.walletBalance -= amount;
     await fromUser.save({ session });
     toUser.walletBalance += amount;
     await toUser.save({ session });
-    await Transaction.create([{ user: req.user.id, type: 'debit', amount, description: description || `Transfer to ${toUser.fullName}` }], { session });
-    await Transaction.create([{ user: toUserId, type: 'credit', amount, description: description || `Transfer from ${fromUser.fullName}` }], { session });
+    await Transaction.create([{
+      user: req.user.id, type: 'debit', amount,
+      description: description || `Transfer to ${toUser.fullName}`
+    }], { session });
+    await Transaction.create([{
+      user: toUserId, type: 'credit', amount,
+      description: description || `Transfer from ${fromUser.fullName}`
+    }], { session });
     await session.commitTransaction();
     res.json({ success: true, data: { balance: fromUser.walletBalance } });
   } catch (error) {
     await session.abortTransaction();
     res.status(500).json({ success: false, message: error.message });
-  } finally { session.endSession(); }
+  } finally {
+    session.endSession();
+  }
 };
 
 // ======================
 // LOANS
 // ======================
+
 exports.applyLoan = async (req, res) => {
   try {
     const { amount, tenureMonths } = req.body;
-    if (!amount || amount < 1000) return res.status(400).json({ success: false, message: 'Minimum loan amount ₹1000' });
+    if (!amount || amount < 1000) {
+      return res.status(400).json({ success: false, message: 'Minimum loan amount ₹1000' });
+    }
     const interestRate = 12;
     const monthlyRate = interestRate / 12 / 100;
-    const emiAmount = (amount * monthlyRate * Math.pow(1 + monthlyRate, tenureMonths)) / (Math.pow(1 + monthlyRate, tenureMonths) - 1);
+    const emiAmount = (amount * monthlyRate * Math.pow(1 + monthlyRate, tenureMonths)) /
+      (Math.pow(1 + monthlyRate, tenureMonths) - 1);
     const totalPayable = emiAmount * tenureMonths;
     const loan = await Loan.create({
-      user: req.user.id, amount, emiAmount: Math.round(emiAmount), tenureMonths,
-      outstanding: totalPayable, interestRate,
-      nextDueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), status: 'active'
+      user: req.user.id,
+      amount,
+      emiAmount: Math.round(emiAmount),
+      tenureMonths,
+      outstanding: totalPayable,
+      interestRate,
+      nextDueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      status: 'active'
     });
     const user = await User.findById(req.user.id);
     user.walletBalance += amount;
     user.loans.push(loan._id);
     await user.save();
-    await Transaction.create({ user: req.user.id, type: 'credit', amount, description: `Loan sanctioned - ${loan._id}` });
+    await Transaction.create({
+      user: req.user.id,
+      type: 'credit',
+      amount,
+      description: `Loan sanctioned - ${loan._id}`
+    });
     res.status(201).json({ success: true, data: loan });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -149,59 +219,98 @@ exports.repayEmi = async (req, res) => {
   session.startTransaction();
   try {
     const loan = await Loan.findById(req.params.loanId).session(session);
-    if (!loan || loan.user.toString() !== req.user.id || loan.status !== 'active') return res.status(400).json({ success: false, message: 'Loan not active' });
+    if (!loan || loan.user.toString() !== req.user.id || loan.status !== 'active') {
+      return res.status(400).json({ success: false, message: 'Loan not active' });
+    }
     const user = await User.findById(req.user.id).session(session);
-    if (user.walletBalance < loan.emiAmount) return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    if (user.walletBalance < loan.emiAmount) {
+      return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    }
     user.walletBalance -= loan.emiAmount;
     await user.save({ session });
     loan.outstanding -= loan.emiAmount;
     loan.emisPaid += 1;
-    if (loan.outstanding <= 0) { loan.status = 'closed'; loan.closedAt = new Date(); }
-    else { loan.nextDueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); }
+    if (loan.outstanding <= 0) {
+      loan.status = 'closed';
+      loan.closedAt = new Date();
+    } else {
+      loan.nextDueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    }
     await loan.save({ session });
-    await Transaction.create([{ user: req.user.id, type: 'debit', amount: loan.emiAmount, description: `EMI payment for loan ${loan._id}` }], { session });
+    await Transaction.create([{
+      user: req.user.id,
+      type: 'debit',
+      amount: loan.emiAmount,
+      description: `EMI payment for loan ${loan._id}`
+    }], { session });
     await session.commitTransaction();
     res.json({ success: true, data: loan });
   } catch (error) {
     await session.abortTransaction();
     res.status(500).json({ success: false, message: error.message });
-  } finally { session.endSession(); }
+  } finally {
+    session.endSession();
+  }
 };
 
 // ======================
 // BILL PAYMENT (BBPS)
 // ======================
+
 exports.payBill = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
     const { billType, billNumber, amount } = req.body;
-    if (!billType || !billNumber || !amount) return res.status(400).json({ success: false, message: 'Missing fields' });
+    if (!billType || !billNumber || !amount) {
+      return res.status(400).json({ success: false, message: 'Missing fields' });
+    }
     const user = await User.findById(req.user.id).session(session);
-    if (user.walletBalance < amount) return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    if (user.walletBalance < amount) {
+      return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    }
 
-    // REAL BBPS API CALL
+    // REAL BBPS API CALL (replace with actual endpoint)
     const bbpsResponse = await axios.post(process.env.BBPS_API_URL, {
-      billerId: billType, customerId: billNumber, amount: amount, referenceId: `BILL_${Date.now()}`
-    }, { headers: { 'x-api-key': process.env.BBPS_API_KEY, 'x-merchant-id': process.env.BBPS_MERCHANT_ID } });
+      billerId: billType,
+      customerId: billNumber,
+      amount,
+      referenceId: `BILL_${Date.now()}`
+    }, {
+      headers: {
+        'x-api-key': process.env.BBPS_API_KEY,
+        'x-merchant-id': process.env.BBPS_MERCHANT_ID
+      }
+    });
     if (!bbpsResponse.data.success) throw new Error('BBPS payment failed');
 
     user.walletBalance -= amount;
     await user.save({ session });
-    const billPayment = await BillPayment.create([{
-      user: req.user.id, billType, billNumber, amount, status: 'paid', paidAt: new Date()
+    const [billPayment] = await BillPayment.create([{
+      user: req.user.id,
+      billType,
+      billNumber,
+      amount,
+      status: 'paid',
+      paidAt: new Date()
     }], { session });
-    const transaction = await Transaction.create([{
-      user: req.user.id, type: 'debit', amount, description: `${billType.toUpperCase()} bill payment - ${billNumber}`, referenceId: billPayment[0]._id
+    const [transaction] = await Transaction.create([{
+      user: req.user.id,
+      type: 'debit',
+      amount,
+      description: `${billType.toUpperCase()} bill payment - ${billNumber}`,
+      referenceId: billPayment._id
     }], { session });
-    billPayment[0].transactionId = transaction[0]._id;
-    await billPayment[0].save({ session });
+    billPayment.transactionId = transaction._id;
+    await billPayment.save({ session });
     await session.commitTransaction();
     res.json({ success: true, data: { balance: user.walletBalance } });
   } catch (error) {
     await session.abortTransaction();
     res.status(500).json({ success: false, message: error.message });
-  } finally { session.endSession(); }
+  } finally {
+    session.endSession();
+  }
 };
 
 exports.getBillHistory = async (req, res) => {
@@ -216,50 +325,85 @@ exports.getBillHistory = async (req, res) => {
 // ======================
 // AEPS WITHDRAWAL
 // ======================
+
 exports.aepsWithdraw = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
     const { aadhaarNumber, amount, bankIIN } = req.body;
-    if (!aadhaarNumber || !amount || amount < 100) return res.status(400).json({ success: false, message: 'Invalid request' });
+    if (!aadhaarNumber || !amount || amount < 100) {
+      return res.status(400).json({ success: false, message: 'Invalid request' });
+    }
     const user = await User.findById(req.user.id).session(session);
-    if (user.walletBalance < amount) return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    if (user.walletBalance < amount) {
+      return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    }
 
     // REAL AEPS API CALL
     const aepsResponse = await axios.post(process.env.AEPS_API_URL, {
-      aadhaarNumber, amount, bankIIN, merchantId: process.env.AEPS_MERCHANT_ID, transactionId: `AEPS_${Date.now()}`
-    }, { headers: { 'x-api-key': process.env.AEPS_API_KEY } });
+      aadhaarNumber,
+      amount,
+      bankIIN,
+      merchantId: process.env.AEPS_MERCHANT_ID,
+      transactionId: `AEPS_${Date.now()}`
+    }, {
+      headers: { 'x-api-key': process.env.AEPS_API_KEY }
+    });
     if (!aepsResponse.data.success) throw new Error('AEPS withdrawal failed');
 
     user.walletBalance -= amount;
     await user.save({ session });
-    const aepsRequest = await AepsRequest.create([{
-      user: req.user.id, aadhaarNumber, bankIIN, amount, type: 'withdrawal', status: 'success'
+    const [aepsRequest] = await AepsRequest.create([{
+      user: req.user.id,
+      aadhaarNumber,
+      bankIIN,
+      amount,
+      type: 'withdrawal',
+      status: 'success'
     }], { session });
     await Transaction.create([{
-      user: req.user.id, type: 'debit', amount, description: `AEPS withdrawal - Aadhaar ${aadhaarNumber.slice(-4)}`, referenceId: aepsRequest[0]._id
+      user: req.user.id,
+      type: 'debit',
+      amount,
+      description: `AEPS withdrawal - Aadhaar ${aadhaarNumber.slice(-4)}`,
+      referenceId: aepsRequest._id
     }], { session });
     await session.commitTransaction();
     res.json({ success: true, data: { balance: user.walletBalance } });
   } catch (error) {
     await session.abortTransaction();
     res.status(500).json({ success: false, message: error.message });
-  } finally { session.endSession(); }
+  } finally {
+    session.endSession();
+  }
 };
 
 // ======================
-// BANK ACCOUNT (Verification)
+// BANK ACCOUNT
 // ======================
+
 exports.verifyBankAccount = async (req, res) => {
   try {
     const { accountNumber, ifsc, accountHolderName, bankName } = req.body;
-    if (!accountNumber || !ifsc) return res.status(400).json({ success: false, message: 'Missing fields' });
-    const verification = await axios.post(process.env.BANK_VERIFICATION_API_URL, { accountNumber, ifsc, name: accountHolderName }, {
+    if (!accountNumber || !ifsc) {
+      return res.status(400).json({ success: false, message: 'Missing fields' });
+    }
+    const verification = await axios.post(process.env.BANK_VERIFICATION_API_URL, {
+      accountNumber, ifsc, name: accountHolderName
+    }, {
       headers: { 'x-api-key': process.env.BANK_VERIFICATION_API_KEY }
     });
-    if (!verification.data.valid) return res.status(400).json({ success: false, message: 'Bank account not verified' });
+    if (!verification.data.valid) {
+      return res.status(400).json({ success: false, message: 'Bank account not verified' });
+    }
     const user = await User.findById(req.user.id);
-    user.bankAccount = { accountNumber, ifsc, bankName, accountHolderName, verified: true };
+    user.bankAccount = {
+      accountNumber,
+      ifsc,
+      bankName,
+      accountHolderName,
+      verified: true
+    };
     await user.save();
     res.json({ success: true, message: 'Bank account verified and saved' });
   } catch (error) {
@@ -290,11 +434,21 @@ exports.getBankAccount = async (req, res) => {
 // ======================
 // WALLET & DASHBOARD
 // ======================
+
 exports.getWallet = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('walletBalance totalEarnings');
-    const transactions = await Transaction.find({ user: req.user.id }).sort({ createdAt: -1 }).limit(50);
-    res.json({ success: true, data: { balance: user.walletBalance, totalEarnings: user.totalEarnings, transactions } });
+    const transactions = await Transaction.find({ user: req.user.id })
+      .sort({ createdAt: -1 })
+      .limit(50);
+    res.json({
+      success: true,
+      data: {
+        balance: user.walletBalance,
+        totalEarnings: user.totalEarnings,
+        transactions
+      }
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -305,7 +459,9 @@ exports.getDashboard = async (req, res) => {
     const user = await User.findById(req.user.id).select('walletBalance totalEarnings');
     const activeLoans = await Loan.find({ user: req.user.id, status: 'active' });
     const totalLoanOutstanding = activeLoans.reduce((sum, l) => sum + l.outstanding, 0);
-    const recentTransactions = await Transaction.find({ user: req.user.id }).sort({ createdAt: -1 }).limit(5);
+    const recentTransactions = await Transaction.find({ user: req.user.id })
+      .sort({ createdAt: -1 })
+      .limit(5);
     res.json({
       success: true,
       data: {

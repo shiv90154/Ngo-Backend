@@ -14,4 +14,6 @@ const loanSchema = new mongoose.Schema({
   emisPaid: { type: Number, default: 0 }
 });
 
+loanSchema.index({ user: 1, status: 1 });
+
 module.exports = mongoose.model('Loan', loanSchema);

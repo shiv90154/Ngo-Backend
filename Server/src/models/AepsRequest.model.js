@@ -12,4 +12,6 @@ const aepsRequestSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+aepsRequestSchema.index({ user: 1, createdAt: -1 });
+
 module.exports = mongoose.model('AepsRequest', aepsRequestSchema);
