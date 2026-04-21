@@ -5,7 +5,8 @@ const router = express.Router();
 const userRoutes = require('./auth.routes');
 const healthcareRoutes = require('./healthcare.routes');
 const mediaRoutes = require('./media.routes');
-const notificationRoutes = require('./notification.routes'); // 🆕 added
+const notificationRoutes = require('./notification.routes');
+const adminRoutes = require('./admin.routes');
 
 // Other route modules
 const educationRoutes = require('./educationRoutes');
@@ -22,7 +23,8 @@ router.get('/health', (req, res) => {
 router.use('/users', userRoutes);
 router.use('/healthcare', healthcareRoutes);
 router.use('/media', mediaRoutes);
-router.use('/notifications', notificationRoutes); // 🆕 added
+router.use('/notifications', notificationRoutes);
+router.use('/admin', adminRoutes); 
 router.use('/education', educationRoutes);
 router.use('/it', itRoutes);
 router.use('/agriculture', agricultureRoutes);
