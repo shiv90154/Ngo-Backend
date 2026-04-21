@@ -7,9 +7,7 @@ const healthcareRoutes = require('./healthcare.routes');
 const mediaRoutes = require('./media.routes');
 const notificationRoutes = require('./notification.routes');
 const adminRoutes = require('./admin.routes');
-
-// Other route modules
-const educationRoutes = require('./educationRoutes');
+const educationRoutes = require('./education.routes');   
 const itRoutes = require('./it.routes');
 const agricultureRoutes = require('./agriculture.routes');
 const financeRoutes = require('./finance.routes');
@@ -24,8 +22,8 @@ router.use('/users', userRoutes);
 router.use('/healthcare', healthcareRoutes);
 router.use('/media', mediaRoutes);
 router.use('/notifications', notificationRoutes);
-router.use('/admin', adminRoutes); 
-router.use('/education', educationRoutes);
+router.use('/admin', adminRoutes);
+router.use('/education', educationRoutes);  
 router.use('/it', itRoutes);
 router.use('/agriculture', agricultureRoutes);
 router.use('/finance', financeRoutes);
