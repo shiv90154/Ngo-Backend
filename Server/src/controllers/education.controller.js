@@ -186,6 +186,33 @@ exports.enrollCourse = async (req, res) => {
   }
 };
 
+// 获取当前用户的课程注册列表
+exports.getMyEnrollments = async (req, res) => {
+  try {
+    const enrollments = await Enrollment.find({ student: req.user.id })
+      .populate({
+        path: 'course',
+        select: 'title description thumbnail price instructor totalEnrolled',
+        populate: { path: 'instructor', select: 'fullName' }
+      })
+      .sort('-enrolledAt');
+    res.json({ success: true, enrollments });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// 获取当前用户的证书（可选）
+exports.getMyCertificates = async (req, res) => {
+  try {
+    const certificates = await Certificate.find({ student: req.user.id })
+      .populate('course', 'title')
+      .sort('-issuedAt');
+    res.json({ success: true, certificates });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
 // ====================== 学习进度 ======================
 exports.markLessonComplete = async (req, res) => {
   try {
