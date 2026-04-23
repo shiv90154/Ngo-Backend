@@ -3,19 +3,29 @@ const Like = require('../models/Like');
 const Comment = require('../models/Comment');
 const Follow = require('../models/Follow');
 const User = require('../models/user.model');
-const Notification = require('../models/Notification'); // 🆕 imported
+const Notification = require('../models/Notification');
 const path = require('path');
 const fs = require('fs').promises;
 
+// Ensure upload directory exists
 const uploadDir = path.join(__dirname, '../uploads/media');
 (async () => {
   await fs.mkdir(uploadDir, { recursive: true });
 })();
 
-// 🆕 Helper: Create a notification (silent fail – won't break the main operation)
+// ---------- Helpers ----------
+const deleteFile = async (filePath) => {
+  const fullPath = path.join(__dirname, '..', filePath);
+  try {
+    await fs.unlink(fullPath);
+  } catch (err) {
+    // File already deleted or doesn't exist – ignore
+  }
+};
+
 const createNotification = async ({ recipient, sender, type, post, comment }) => {
   try {
-    // Don't notify if sender is the recipient
+    // Don't notify yourself
     if (recipient.toString() === sender.toString()) return;
 
     await Notification.create({
@@ -26,13 +36,23 @@ const createNotification = async ({ recipient, sender, type, post, comment }) =>
       comment,
     });
   } catch (error) {
-    console.error('Failed to create notification:', error);
+    console.error('Notification creation failed:', error);
   }
 };
 
-// ======================
-// POST CRUD
-// ======================
+// Batch like status for a list of posts
+const addLikeStatus = async (posts, userId) => {
+  if (!posts.length) return;
+  const postIds = posts.map(p => p._id);
+  const likedPosts = await Like.find({
+    post: { $in: postIds },
+    user: userId,
+  }).select('post');
+  const likedSet = new Set(likedPosts.map(l => l.post.toString()));
+  posts.forEach(p => (p.isLiked = likedSet.has(p._id.toString())));
+};
+
+// ---------- POST CRUD ----------
 
 // Create a post (with media files)
 exports.createPost = async (req, res) => {
@@ -40,18 +60,18 @@ exports.createPost = async (req, res) => {
     const { content, tags, location } = req.body;
     const author = req.user.id;
 
-    // Check if user is a media creator
+    // Check creator status
     const user = await User.findById(author);
-    if (!user.mediaCreatorProfile?.isCreator) {
+    if (!user?.mediaCreatorProfile?.isCreator) {
       return res.status(403).json({ success: false, message: 'You are not a media creator' });
     }
 
     const media = [];
     if (req.files && req.files.length > 0) {
       for (const file of req.files) {
-        const fileType = file.mimetype.startsWith('image/') ? 'image' : 'video';
+        const type = file.mimetype.startsWith('image/') ? 'image' : 'video';
         media.push({
-          type: fileType,
+          type,
           url: `/uploads/media/${file.filename}`,
         });
       }
@@ -61,24 +81,22 @@ exports.createPost = async (req, res) => {
       author,
       content,
       media,
-      tags: tags ? tags.split(',').map(t => t.trim()) : [],
+      tags: tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : [],
       location,
     });
 
-    // Update user's post count
+    // Update user stats
     await User.findByIdAndUpdate(author, {
       $inc: { 'mediaCreatorProfile.totalPosts': 1 },
-      $push: { mediaPosts: post._id },
     });
 
-    await post.populate('author', 'fullName profileImage mediaCreatorProfile');
-
-    res.status(201).json({ success: true, post });
+    const populated = await post.populate('author', 'fullName profileImage mediaCreatorProfile');
+    res.status(201).json({ success: true, post: populated });
   } catch (error) {
     // Cleanup uploaded files on error
     if (req.files) {
       for (const file of req.files) {
-        await fs.unlink(file.path).catch(() => {});
+        await deleteFile(file.path);
       }
     }
     res.status(500).json({ success: false, error: error.message });
@@ -92,11 +110,9 @@ exports.getPost = async (req, res) => {
       .populate('author', 'fullName profileImage mediaCreatorProfile')
       .lean();
 
-    if (!post) {
-      return res.status(404).json({ success: false, message: 'Post not found' });
-    }
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
 
-    // Check if current user liked this post
+    // Like status for current user
     const like = await Like.findOne({ post: post._id, user: req.user.id });
     post.isLiked = !!like;
 
@@ -109,20 +125,16 @@ exports.getPost = async (req, res) => {
 // Update a post
 exports.updatePost = async (req, res) => {
   try {
-    const { content, tags, location } = req.body;
     const post = await MediaPost.findById(req.params.id);
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
 
-    if (!post) {
-      return res.status(404).json({ success: false, message: 'Post not found' });
-    }
-
-    // Authorization
     if (post.author.toString() !== req.user.id && req.user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
+    const { content, tags, location } = req.body;
     if (content !== undefined) post.content = content;
-    if (tags !== undefined) post.tags = tags.split(',').map(t => t.trim());
+    if (tags !== undefined) post.tags = tags.split(',').map(t => t.trim()).filter(Boolean);
     if (location !== undefined) post.location = location;
 
     await post.save();
@@ -136,35 +148,28 @@ exports.updatePost = async (req, res) => {
 exports.deletePost = async (req, res) => {
   try {
     const post = await MediaPost.findById(req.params.id);
-    if (!post) {
-      return res.status(404).json({ success: false, message: 'Post not found' });
-    }
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
 
-    // Authorization
     if (post.author.toString() !== req.user.id && req.user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
-    // Delete media files
+    // Delete associated media files
     for (const media of post.media) {
-      const filePath = path.join(__dirname, '..', media.url);
-      await fs.unlink(filePath).catch(() => {});
+      await deleteFile(media.url);
     }
 
-    // Delete associated likes and comments
+    // Clean up likes, comments, notifications
     await Like.deleteMany({ post: post._id });
     await Comment.deleteMany({ post: post._id });
-    // 🆕 Delete related notifications
     await Notification.deleteMany({ post: post._id });
 
-    // Update user's post count
+    // Update user post count
     await User.findByIdAndUpdate(post.author, {
       $inc: { 'mediaCreatorProfile.totalPosts': -1 },
-      $pull: { mediaPosts: post._id },
     });
 
     await post.deleteOne();
-
     res.json({ success: true, message: 'Post deleted' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -176,98 +181,83 @@ exports.getUserPosts = async (req, res) => {
   try {
     const { userId } = req.params;
     const { page = 1, limit = 10 } = req.query;
+    const skip = (page - 1) * limit;
 
-    const posts = await MediaPost.find({ author: userId, isPublished: true })
-      .populate('author', 'fullName profileImage mediaCreatorProfile')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .lean();
+    const [posts, total] = await Promise.all([
+      MediaPost.find({ author: userId })
+        .populate('author', 'fullName profileImage mediaCreatorProfile')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Number(limit))
+        .lean(),
+      MediaPost.countDocuments({ author: userId }),
+    ]);
 
-    // Add isLiked flag for each post
-    for (const post of posts) {
-      const like = await Like.findOne({ post: post._id, user: req.user.id });
-      post.isLiked = !!like;
-    }
-
-    const total = await MediaPost.countDocuments({ author: userId, isPublished: true });
+    await addLikeStatus(posts, req.user.id);
 
     res.json({
       success: true,
       posts,
       totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      currentPage: Number(page),
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// ======================
-// FEED (for current user)
-// ======================
+// ---------- FEED ----------
 exports.getFeed = async (req, res) => {
   try {
     const { page = 1, limit = 10 } = req.query;
     const userId = req.user.id;
+    const skip = (page - 1) * limit;
 
-    // Get list of users the current user follows
-    const following = await Follow.find({ follower: userId }).select('following');
+    // Get users the current user follows (including self)
+    const following = await Follow.find({ follower: userId }).select('following').lean();
     const followingIds = following.map(f => f.following);
-    // Include user's own posts in feed
-    followingIds.push(userId);
+    followingIds.push(userId); // include own posts
 
-    const posts = await MediaPost.find({ author: { $in: followingIds }, isPublished: true })
-      .populate('author', 'fullName profileImage mediaCreatorProfile')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .lean();
+    const [posts, total] = await Promise.all([
+      MediaPost.find({ author: { $in: followingIds } })
+        .populate('author', 'fullName profileImage mediaCreatorProfile')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Number(limit))
+        .lean(),
+      MediaPost.countDocuments({ author: { $in: followingIds } }),
+    ]);
 
-    // Add isLiked flag
-    for (const post of posts) {
-      const like = await Like.findOne({ post: post._id, user: userId });
-      post.isLiked = !!like;
-    }
-
-    const total = await MediaPost.countDocuments({ author: { $in: followingIds }, isPublished: true });
+    await addLikeStatus(posts, userId);
 
     res.json({
       success: true,
       posts,
       totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      currentPage: Number(page),
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// ======================
-// LIKES
-// ======================
+// ---------- LIKES ----------
 
-// Like a post
 exports.likePost = async (req, res) => {
   try {
     const postId = req.params.id;
     const userId = req.user.id;
 
     const post = await MediaPost.findById(postId).populate('author');
-    if (!post) {
-      return res.status(404).json({ success: false, message: 'Post not found' });
-    }
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
 
-    const existingLike = await Like.findOne({ post: postId, user: userId });
-    if (existingLike) {
-      return res.status(400).json({ success: false, message: 'Already liked' });
-    }
+    const existing = await Like.findOne({ post: postId, user: userId });
+    if (existing) return res.status(400).json({ success: false, message: 'Already liked' });
 
     await Like.create({ post: postId, user: userId });
     post.likesCount += 1;
     await post.save();
 
-    // 🆕 Create notification for post author
     await createNotification({
       recipient: post.author._id,
       sender: userId,
@@ -281,21 +271,16 @@ exports.likePost = async (req, res) => {
   }
 };
 
-// Unlike a post
 exports.unlikePost = async (req, res) => {
   try {
     const postId = req.params.id;
     const userId = req.user.id;
 
     const post = await MediaPost.findById(postId);
-    if (!post) {
-      return res.status(404).json({ success: false, message: 'Post not found' });
-    }
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
 
     const result = await Like.deleteOne({ post: postId, user: userId });
-    if (result.deletedCount === 0) {
-      return res.status(400).json({ success: false, message: 'Not liked yet' });
-    }
+    if (result.deletedCount === 0) return res.status(400).json({ success: false, message: 'Not liked yet' });
 
     post.likesCount = Math.max(0, post.likesCount - 1);
     await post.save();
@@ -306,25 +291,18 @@ exports.unlikePost = async (req, res) => {
   }
 };
 
-// ======================
-// COMMENTS
-// ======================
+// ---------- COMMENTS ----------
 
-// Add comment
 exports.addComment = async (req, res) => {
   try {
     const { text } = req.body;
     const postId = req.params.id;
     const userId = req.user.id;
 
-    if (!text || text.trim().length === 0) {
-      return res.status(400).json({ success: false, message: 'Comment text is required' });
-    }
+    if (!text || !text.trim()) return res.status(400).json({ success: false, message: 'Comment text required' });
 
     const post = await MediaPost.findById(postId).populate('author');
-    if (!post) {
-      return res.status(404).json({ success: false, message: 'Post not found' });
-    }
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
 
     const comment = await Comment.create({
       post: postId,
@@ -335,7 +313,6 @@ exports.addComment = async (req, res) => {
     post.commentsCount += 1;
     await post.save();
 
-    // 🆕 Create notification for post author
     await createNotification({
       recipient: post.author._id,
       sender: userId,
@@ -352,28 +329,24 @@ exports.addComment = async (req, res) => {
   }
 };
 
-// Delete comment
 exports.deleteComment = async (req, res) => {
   try {
     const comment = await Comment.findById(req.params.commentId);
-    if (!comment) {
-      return res.status(404).json({ success: false, message: 'Comment not found' });
-    }
+    if (!comment) return res.status(404).json({ success: false, message: 'Comment not found' });
 
-    // Authorization: comment author or post author or admin
     const post = await MediaPost.findById(comment.post);
-    const isAuthorized = req.user.id === comment.user.toString() ||
-                         req.user.id === post.author.toString() ||
-                         req.user.role === 'SUPER_ADMIN';
+    const isAuthorized =
+      req.user.id === comment.user.toString() ||
+      req.user.id === post?.author.toString() ||
+      req.user.role === 'SUPER_ADMIN';
 
-    if (!isAuthorized) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
+    if (!isAuthorized) return res.status(403).json({ success: false, message: 'Not authorized' });
 
     await comment.deleteOne();
-
-    post.commentsCount = Math.max(0, post.commentsCount - 1);
-    await post.save();
+    if (post) {
+      post.commentsCount = Math.max(0, post.commentsCount - 1);
+      await post.save();
+    }
 
     res.json({ success: true, message: 'Comment deleted' });
   } catch (error) {
@@ -381,68 +354,55 @@ exports.deleteComment = async (req, res) => {
   }
 };
 
-// Get comments for a post
 exports.getComments = async (req, res) => {
   try {
-    const postId = req.params.id;
+    const { id } = req.params;
     const { page = 1, limit = 20 } = req.query;
+    const skip = (page - 1) * limit;
 
-    const comments = await Comment.find({ post: postId })
-      .populate('user', 'fullName profileImage')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await Comment.countDocuments({ post: postId });
+    const [comments, total] = await Promise.all([
+      Comment.find({ post: id })
+        .populate('user', 'fullName profileImage')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Number(limit))
+        .lean(),
+      Comment.countDocuments({ post: id }),
+    ]);
 
     res.json({
       success: true,
       comments,
       totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      currentPage: Number(page),
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// ======================
-// FOLLOW SYSTEM
-// ======================
+// ---------- FOLLOW SYSTEM ----------
 
-// Follow a user
 exports.followUser = async (req, res) => {
   try {
-    const targetUserId = req.params.userId;
+    const targetId = req.params.userId;
     const followerId = req.user.id;
 
-    if (targetUserId === followerId) {
-      return res.status(400).json({ success: false, message: 'Cannot follow yourself' });
-    }
+    if (targetId === followerId) return res.status(400).json({ success: false, message: 'Cannot follow yourself' });
 
-    const targetUser = await User.findById(targetUserId);
-    if (!targetUser) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
+    const target = await User.findById(targetId);
+    if (!target) return res.status(404).json({ success: false, message: 'User not found' });
 
-    const existingFollow = await Follow.findOne({ follower: followerId, following: targetUserId });
-    if (existingFollow) {
-      return res.status(400).json({ success: false, message: 'Already following' });
-    }
+    const existing = await Follow.findOne({ follower: followerId, following: targetId });
+    if (existing) return res.status(400).json({ success: false, message: 'Already following' });
 
-    await Follow.create({ follower: followerId, following: targetUserId });
+    await Follow.create({ follower: followerId, following: targetId });
 
-    // Update follower counts in both users' mediaCreatorProfile
-    await User.findByIdAndUpdate(followerId, {
-      $inc: { 'mediaCreatorProfile.totalFollowing': 1 },
-    });
-    await User.findByIdAndUpdate(targetUserId, {
-      $inc: { 'mediaCreatorProfile.totalFollowers': 1 },
-    });
+    await User.findByIdAndUpdate(followerId, { $inc: { 'mediaCreatorProfile.totalFollowing': 1 } });
+    await User.findByIdAndUpdate(targetId, { $inc: { 'mediaCreatorProfile.totalFollowers': 1 } });
 
-    // 🆕 Create notification for the user being followed
     await createNotification({
-      recipient: targetUserId,
+      recipient: targetId,
       sender: followerId,
       type: 'follow',
     });
@@ -453,23 +413,16 @@ exports.followUser = async (req, res) => {
   }
 };
 
-// Unfollow a user
 exports.unfollowUser = async (req, res) => {
   try {
-    const targetUserId = req.params.userId;
+    const targetId = req.params.userId;
     const followerId = req.user.id;
 
-    const result = await Follow.deleteOne({ follower: followerId, following: targetUserId });
-    if (result.deletedCount === 0) {
-      return res.status(400).json({ success: false, message: 'Not following' });
-    }
+    const result = await Follow.deleteOne({ follower: followerId, following: targetId });
+    if (result.deletedCount === 0) return res.status(400).json({ success: false, message: 'Not following' });
 
-    await User.findByIdAndUpdate(followerId, {
-      $inc: { 'mediaCreatorProfile.totalFollowing': -1 },
-    });
-    await User.findByIdAndUpdate(targetUserId, {
-      $inc: { 'mediaCreatorProfile.totalFollowers': -1 },
-    });
+    await User.findByIdAndUpdate(followerId, { $inc: { 'mediaCreatorProfile.totalFollowing': -1 } });
+    await User.findByIdAndUpdate(targetId, { $inc: { 'mediaCreatorProfile.totalFollowers': -1 } });
 
     res.json({ success: true, message: 'Unfollowed successfully' });
   } catch (error) {
@@ -477,145 +430,113 @@ exports.unfollowUser = async (req, res) => {
   }
 };
 
-// Get followers list
 exports.getFollowers = async (req, res) => {
   try {
     const userId = req.params.userId || req.user.id;
     const { page = 1, limit = 20 } = req.query;
+    const skip = (page - 1) * limit;
 
-    const follows = await Follow.find({ following: userId })
-      .populate('follower', 'fullName profileImage mediaCreatorProfile')
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+    const [follows, total] = await Promise.all([
+      Follow.find({ following: userId })
+        .populate('follower', 'fullName profileImage mediaCreatorProfile')
+        .skip(skip)
+        .limit(Number(limit))
+        .lean(),
+      Follow.countDocuments({ following: userId }),
+    ]);
 
-    const total = await Follow.countDocuments({ following: userId });
-
+    const followers = follows.map(f => f.follower);
     res.json({
       success: true,
-      followers: follows.map(f => f.follower),
+      followers,
       totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      currentPage: Number(page),
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// Get following list
 exports.getFollowing = async (req, res) => {
   try {
     const userId = req.params.userId || req.user.id;
     const { page = 1, limit = 20 } = req.query;
+    const skip = (page - 1) * limit;
 
-    const follows = await Follow.find({ follower: userId })
-      .populate('following', 'fullName profileImage mediaCreatorProfile')
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+    const [follows, total] = await Promise.all([
+      Follow.find({ follower: userId })
+        .populate('following', 'fullName profileImage mediaCreatorProfile')
+        .skip(skip)
+        .limit(Number(limit))
+        .lean(),
+      Follow.countDocuments({ follower: userId }),
+    ]);
 
-    const total = await Follow.countDocuments({ follower: userId });
-
+    const following = follows.map(f => f.following);
     res.json({
       success: true,
-      following: follows.map(f => f.following),
+      following,
       totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      currentPage: Number(page),
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// src/controllers/media.controller.js
-exports.searchCreators = async (req, res) => {
-  try {
-    const { q, page = 1, limit = 20 } = req.query;
-    const query = { 'mediaCreatorProfile.isCreator': true };
-    
-    if (q && q.trim()) {
-      query.$or = [
-        { fullName: { $regex: q, $options: 'i' } },
-        { email: { $regex: q, $options: 'i' } },
-      ];
-    }
-    
-    // 构建排序：有查询词时按相关性（这里简化为默认排序），无查询词时按粉丝数降序
-    const sort = q && q.trim() ? {} : { 'mediaCreatorProfile.totalFollowers': -1 };
-    
-    const users = await User.find(query)
-      .select('fullName profileImage mediaCreatorProfile')
-      .sort(sort)
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await User.countDocuments(query);
-    res.json({
-      success: true,
-      users,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-// Check if current user follows another user
 exports.checkFollowStatus = async (req, res) => {
   try {
-    const targetUserId = req.params.userId;
-    const followerId = req.user.id;
-
-    const follow = await Follow.findOne({ follower: followerId, following: targetUserId });
+    const targetId = req.params.userId;
+    const currentUserId = req.user.id;
+    const follow = await Follow.findOne({ follower: currentUserId, following: targetId });
     res.json({ success: true, isFollowing: !!follow });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// Search users/creators
+// ---------- SEARCH & CREATOR MANAGEMENT ----------
+
 exports.searchCreators = async (req, res) => {
   try {
     const { q, page = 1, limit = 20 } = req.query;
-    if (!q) {
-      return res.status(400).json({ success: false, message: 'Search query required' });
+    const skip = (page - 1) * limit;
+
+    let filter = { 'mediaCreatorProfile.isCreator': true };
+    if (q && q.trim()) {
+      filter.$or = [
+        { fullName: { $regex: q.trim(), $options: 'i' } },
+        { email: { $regex: q.trim(), $options: 'i' } },
+      ];
     }
 
-    const users = await User.find({
-      $or: [
-        { fullName: { $regex: q, $options: 'i' } },
-        { email: { $regex: q, $options: 'i' } },
-      ],
-      'mediaCreatorProfile.isCreator': true,
-    })
-      .select('fullName profileImage mediaCreatorProfile')
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+    const sort = q ? {} : { 'mediaCreatorProfile.totalFollowers': -1 };
 
-    const total = await User.countDocuments({
-      $or: [
-        { fullName: { $regex: q, $options: 'i' } },
-        { email: { $regex: q, $options: 'i' } },
-      ],
-      'mediaCreatorProfile.isCreator': true,
-    });
+    const [users, total] = await Promise.all([
+      User.find(filter)
+        .select('fullName profileImage mediaCreatorProfile')
+        .sort(sort)
+        .skip(skip)
+        .limit(Number(limit))
+        .lean(),
+      User.countDocuments(filter),
+    ]);
 
     res.json({
       success: true,
       users,
       totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      currentPage: Number(page),
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// Toggle media creator status (for user to become creator)
 exports.becomeCreator = async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     if (user.mediaCreatorProfile?.isCreator) {
       return res.status(400).json({ success: false, message: 'Already a creator' });
@@ -624,11 +545,7 @@ exports.becomeCreator = async (req, res) => {
     user.mediaCreatorProfile = {
       ...user.mediaCreatorProfile,
       isCreator: true,
-      creatorStatus: 'approved', // auto-approve for now; can be 'pending' if admin approval needed
-      totalPosts: 0,
-      totalFollowers: 0,
-      totalFollowing: 0,
-      monetizationEarnings: 0,
+      creatorStatus: 'approved',
     };
     await user.save();
 
