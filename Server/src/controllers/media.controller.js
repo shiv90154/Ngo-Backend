@@ -525,6 +525,39 @@ exports.getFollowing = async (req, res) => {
   }
 };
 
+// src/controllers/media.controller.js
+exports.searchCreators = async (req, res) => {
+  try {
+    const { q, page = 1, limit = 20 } = req.query;
+    const query = { 'mediaCreatorProfile.isCreator': true };
+    
+    if (q && q.trim()) {
+      query.$or = [
+        { fullName: { $regex: q, $options: 'i' } },
+        { email: { $regex: q, $options: 'i' } },
+      ];
+    }
+    
+    // 构建排序：有查询词时按相关性（这里简化为默认排序），无查询词时按粉丝数降序
+    const sort = q && q.trim() ? {} : { 'mediaCreatorProfile.totalFollowers': -1 };
+    
+    const users = await User.find(query)
+      .select('fullName profileImage mediaCreatorProfile')
+      .sort(sort)
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await User.countDocuments(query);
+    res.json({
+      success: true,
+      users,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
 // Check if current user follows another user
 exports.checkFollowStatus = async (req, res) => {
   try {
