@@ -1,78 +1,36 @@
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth.middleware');
-const {
-  // Clients
-  createClient,
-  getClients,
-  getClientById,
-  updateClient,
-  deleteClient,
-  // Projects
-  createProject,
-  getProjects,
-  getProjectById,
-  updateProject,
-  deleteProject,
-  // Invoices
-  createInvoice,
-  getInvoices,
-  getInvoiceById,
-  updateInvoiceStatus,
-  // Service Requests
-  createServiceRequest,
-  getServiceRequests,
-  updateServiceRequestStatus,
-  // Dashboard
-  getDashboardStats
-} = require('../controllers/it.controller');
+const { protect, restrictTo } = require('../middleware/auth.middleware');
+const itController = require('../controllers/it.controller');
 
-// All routes require authentication
-router.use(protect);
+router.use(protect); 
+router.get('/dashboard', itController.getDashboard);
 
-// ======================
-// CLIENTS
-// ======================
-router.route('/clients')
-  .get(getClients)
-  .post(createClient);
-router.route('/clients/:id')
-  .get(getClientById)
-  .put(updateClient)
-  .delete(deleteClient);
+// 客户
+router.post('/clients', itController.createClient);
+router.get('/clients', itController.getClients);
+router.get('/clients/:id', itController.getClient);
+router.put('/clients/:id', itController.updateClient);
+router.delete('/clients/:id', restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), itController.deleteClient);
 
-// ======================
-// PROJECTS
-// ======================
-router.route('/projects')
-  .get(getProjects)
-  .post(createProject);
-router.route('/projects/:id')
-  .get(getProjectById)
-  .put(updateProject)
-  .delete(deleteProject);
+// 项目
+router.post('/projects', itController.createProject);
+router.get('/projects', itController.getProjects);
+router.get('/projects/:id', itController.getProject);
+router.put('/projects/:id', itController.updateProject);
+router.delete('/projects/:id', restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), itController.deleteProject);
 
-// ======================
-// INVOICES
-// ======================
-router.route('/invoices')
-  .get(getInvoices)
-  .post(createInvoice);
-router.route('/invoices/:id')
-  .get(getInvoiceById);
-router.put('/invoices/:id/status', updateInvoiceStatus);
+// 发票
+router.post('/invoices', itController.createInvoice);
+router.get('/invoices', itController.getInvoices);
+router.get('/invoices/:id', itController.getInvoice);
+router.put('/invoices/:id', itController.updateInvoice);
+router.delete('/invoices/:id', restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), itController.deleteInvoice);
 
-// ======================
-// SERVICE REQUESTS
-// ======================
-router.route('/service-requests')
-  .get(getServiceRequests)
-  .post(createServiceRequest);
-router.put('/service-requests/:id/status', updateServiceRequestStatus);
-
-// ======================
-// DASHBOARD STATS
-// ======================
-router.get('/dashboard', getDashboardStats);
+// 任务
+router.post('/tasks', itController.createTask);
+router.get('/tasks', itController.getTasks);
+router.put('/tasks/:id', itController.updateTask);
+router.delete('/tasks/:id', itController.deleteTask);
 
 module.exports = router;

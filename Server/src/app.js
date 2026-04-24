@@ -14,22 +14,25 @@ app.use(cors({
 }));
 
 // 🆕 IMPORTANT: Razorpay webhook needs the raw request body for signature verification.
-// This middleware must be placed BEFORE the general JSON/urlencoded parsers.
 app.use('/api/finance/webhooks/razorpay', express.raw({ type: 'application/json' }));
 
 // General body parsers for all other routes
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-const uploadsDir = path.join(__dirname, '../uploads');
+/**
+ * FIX: Pointing to the correct uploads directory.
+ * Since app.js is in /src, and your uploads folder is also in /src,
+ * we use path.join(__dirname, 'uploads').
+ */
+const uploadsDir = path.join(__dirname, 'uploads');
+
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
-app.use('/uploads', express.static(uploadsDir));
 
-// Optional: serve temp_uploads for debugging (don't expose in production)
-// const tempDir = path.join(__dirname, '../temp_uploads');
-// if (fs.existsSync(tempDir)) app.use('/temp_uploads', express.static(tempDir));
+// Serving static files
+app.use('/uploads', express.static(uploadsDir));
 
 // Health check endpoint
 app.get('/', (req, res) => {
