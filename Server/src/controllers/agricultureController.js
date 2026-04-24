@@ -935,7 +935,7 @@ const getDashboard = async (req, res, next) => {
         const totalOrders = await Order.countDocuments({
             $or: [{ buyer: req.user.id }, { seller: req.user.id }]
         });
-        const recentCrops = await Crop.find({ user: userId })
+        const recentCrops = await Crop.find({ user: req.user.id })
             .sort({ createdAt: -1 })
             .limit(2);
 
