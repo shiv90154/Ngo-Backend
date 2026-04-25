@@ -28,7 +28,7 @@ const orderSchema = new mongoose.Schema(
             min: [0, 'Total price cannot be negative']
         },
         deliveryAddress: {
-            street: { type: String, required: true },
+            block: { type: String, required: true },
             city: { type: String, required: true },
             state: String,
             pincode: String,
@@ -64,14 +64,13 @@ orderSchema.index({ seller: 1, status: 1 });
 orderSchema.index({ product: 1 });
 
 // Auto‑calculate totalPrice before saving (optional safety)
-orderSchema.pre('save', async function (next) {
+orderSchema.pre('save', async function () {
     if (this.isModified('quantity') || this.isNew) {
         const product = await mongoose.model('Product').findById(this.product);
         if (product) {
             this.totalPrice = product.price * this.quantity;
         }
     }
-    next();
 });
 
 module.exports = mongoose.model('Order', orderSchema);

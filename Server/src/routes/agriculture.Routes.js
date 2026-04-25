@@ -37,8 +37,7 @@ const {
     // Dashboard & Profile
     getDashboard,
     getProfile,
-    updateProfile,
-
+    getUserAddresses,
     // Seller module
     getSellerDashboard,
     getSellerProducts,
@@ -49,7 +48,8 @@ const {
 
     // Test
     testAddProduct,
-    testAddCrop
+    getSellerOrders,
+    getMandiPrices
 } = require('../controllers/agricultureController');
 
 const { protect } = require('../middleware/auth.middleware');
@@ -60,7 +60,6 @@ router.get('/products/:id', getProductById);
 router.get('/search', searchProducts);
 
 router.post('/test-add-product', testAddProduct);
-router.post('/test-add-crop', testAddCrop);
 
 // ---------------- PROTECTED ----------------
 router.use(protect);
@@ -69,12 +68,13 @@ router.use(protect);
 router.get('/dashboard', getDashboard);
 router.route('/profile')
     .get(getProfile)
-    .put(updateProfile);
 
 // Orders
 router.post('/orders', createOrder);
 router.get('/my-orders', getMyOrders);
 
+//Address
+router.get('/addresses', getUserAddresses);
 // Cart
 router.route('/cart')
     .get(getCart)
@@ -98,6 +98,9 @@ router.route('/seller/products/:id')
     .put(updateSellerProduct)
     .delete(deleteSellerProduct);
 
+router.route("/seller/orders")
+    .get(getSellerOrders);
+
 // ---------------- LEGACY DEALER ROUTES ----------------
 router.route('/my-products')
     .get(getMyProducts)
@@ -107,60 +110,12 @@ router.route('/my-products/:id')
     .put(updateMyProduct)
     .delete(deleteMyProduct);
 
-// ---------------- CROP MANAGEMENT ----------------
-router.route('/crops')
-    .get(getAllRecords)
-    .post(createRecord);
 
 //------------------MANDI PRICES----------------
 
-const MANDI_API_KEY = "579b464db66ec23bdd0000014b99536624ca49184e6d9ef5a2643829"
-const MANDI_BASE_URL = "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070";
-
-router.get("/mandi", protect, async (req, res) => {
-    try {
-        const { state, district, market, commodity } = req.query;
-
-        // Build filters for data.gov.in API
-        const params = new URLSearchParams({
-            "api-key": MANDI_API_KEY,
-            format: "json",
-            limit: "100",
-        });
-
-        if (state) params.append("filters[state]", state);
-        if (district) params.append("filters[district]", district);
-        if (market) params.append("filters[market]", market);
-        if (commodity) params.append("filters[commodity]", commodity);
-
-        const url = `${MANDI_BASE_URL}?${params.toString()}`;
-
-        const response = await axios.get(url, { timeout: 10000 });
-
-        // Forward the records to the client
-        res.status(200).json({
-            success: true,
-            records: response.data.records || [],
-            total: response.data.total || 0,
-        });
-    } catch (error) {
-        console.error("Mandi API proxy error:", error.message);
-        res.status(500).json({
-            success: false,
-            message: "Failed to fetch mandi prices",
-            error: error.message,
-        });
-    }
-});
-
-router.route('/crops/:id')
-    .get(getRecordById)
-    .put(updateRecord)
-    .delete(deleteRecord);
-
+router.get("/mandi", getMandiPrices);
 // ---------------- AGRICULTURE BUSINESS LOGIC ----------------
-router.get('/yield-summary', getYieldSummary);
-router.get('/tasks/upcoming', getUpcomingTasks);
-router.post('/sensor-data', recordSensorData);
+// router.get('/tasks/upcoming', getUpcomingTasks);
+// router.post('/sensor-data', recordSensorData);
 
 module.exports = router;

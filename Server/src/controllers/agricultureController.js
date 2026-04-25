@@ -2,8 +2,10 @@ const mongoose = require('mongoose');
 const Product = require('../models/Product.model');
 const Order = require('../models/Order.model');
 const Cart = require('../models/Cart.model');
-const Crop = require('../models/Crop.model');
 const User = require('../models/user.model');
+const CustomerAddress = require("../models/CustomerAddresses");
+const axios = require('axios');
+require('dotenv').config();
 
 const PRIVILEGED_ROLES = [
     'SUPER_ADMIN',
@@ -15,6 +17,8 @@ const PRIVILEGED_ROLES = [
     'BLOCK_OFFICER',
     'VILLAGE_OFFICER'
 ];
+const MANDI_API_KEY = "579b464db66ec23bdd0000014b99536624ca49184e6d9ef5a2643829"
+const MANDI_BASE_URL = "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
 
 const hasAgricultureModule = (user) =>
     Array.isArray(user?.modules) && user.modules.includes('AGRICULTURE');
@@ -243,15 +247,40 @@ const createOrder = async (req, res, next) => {
 const getMyOrders = async (req, res, next) => {
     try {
         const orders = await Order.find({ buyer: req.user.id })
-            .populate('product', 'name price images')
+            .populate({
+                path: 'product',
+                select: 'name price images imageUrl' // include both fields if needed
+            })
             .sort({ createdAt: -1 });
 
-        res.status(200).json({ success: true, data: orders });
+        // Transform each order to match frontend expectations
+        const sanitizedOrders = orders.map(order => {
+            const orderObj = order.toObject();
+
+            // Ensure product.images is an array (convert imageUrl if present)
+            if (orderObj.product) {
+                if (!orderObj.product.images && orderObj.product.imageUrl) {
+                    orderObj.product.images = [orderObj.product.imageUrl];
+                } else if (!orderObj.product.images) {
+                    orderObj.product.images = [];
+                }
+            } else {
+                // Fallback if product is missing (deleted)
+                orderObj.product = {
+                    name: 'Product unavailable',
+                    price: 0,
+                    images: []
+                };
+            }
+
+            return orderObj;
+        });
+
+        res.status(200).json({ success: true, data: sanitizedOrders });
     } catch (error) {
         next(error);
     }
 };
-
 // ------------------- SELLER MODULE -------------------
 
 // @desc    Get seller dashboard
@@ -726,32 +755,70 @@ const removeCartItem = async (req, res, next) => {
 
 const checkout = async (req, res, next) => {
     try {
+        const { deliveryAddress } = req.body;
+        if (!deliveryAddress || !deliveryAddress.city || !deliveryAddress.block) {
+            return res.status(400).json({
+                success: false,
+                message: 'Complete delivery address (city & block) is required'
+            });
+        }
         const cart = await Cart.findOne({ user: req.user.id }).populate('items.product');
-
         if (!cart || cart.items.length === 0) {
             return res.status(400).json({ success: false, message: 'Cart is empty' });
         }
 
         for (const item of cart.items) {
-            await Order.create({
-                buyer: req.user.id,
-                seller: item.product.seller,
-                product: item.product._id,
-                quantity: item.quantity,
-                totalPrice: item.price * item.quantity,
-                deliveryAddress: req.body.deliveryAddress || {}
-            });
+            const product = item.product;
+            if (!product) {
+                return res.status(400).json({ success: false, message: 'Product not found in cart' });
+            }
+            if (product.quantity < item.quantity) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Insufficient stock for ${product.name}. Only ${product.quantity} left.`
+                });
+            }
         }
 
-        cart.items = [];
-        await cart.save();
+        const session = await mongoose.startSession();
+        session.startTransaction();
 
-        res.status(200).json({ success: true });
+        try {
+            for (const item of cart.items) {
+                await Order.create([{
+                    buyer: req.user.id,
+                    seller: item.product.seller,
+                    product: item.product._id,
+                    quantity: item.quantity,
+                    totalPrice: item.price * item.quantity,
+                    deliveryAddress,
+                    orderStatus: 'pending',
+                    paymentStatus: 'pending'
+                }], { session });
+            }
+            for (const item of cart.items) {
+                await Product.updateOne(
+                    { _id: item.product._id, quantity: { $gte: item.quantity } },
+                    { $inc: { quantity: -item.quantity } },
+                    { session }
+                );
+            }
+
+            cart.items = [];
+            await cart.save({ session });
+
+            await session.commitTransaction();
+            res.status(200).json({ success: true });
+        } catch (error) {
+            await session.abortTransaction();
+            throw error;
+        } finally {
+            session.endSession();
+        }
     } catch (error) {
         next(error);
     }
 };
-
 // ------------------- LEGACY MY PRODUCTS -------------------
 
 const getMyProducts = async (req, res, next) => {
@@ -845,73 +912,6 @@ const deleteMyProduct = async (req, res, next) => {
     }
 };
 
-// ------------------- CROP FUNCTIONS -------------------
-
-const getAllRecords = async (req, res, next) => {
-    try {
-        const crops = await Crop.find({ user: req.user.id });
-        res.status(200).json({ success: true, data: crops });
-    } catch (error) {
-        next(error);
-    }
-};
-
-const getRecordById = async (req, res, next) => {
-    try {
-        const crop = await Crop.findOne({ _id: req.params.id, user: req.user.id });
-
-        if (!crop) {
-            return res.status(404).json({ success: false, message: 'Crop not found' });
-        }
-
-        res.status(200).json({ success: true, data: crop });
-    } catch (error) {
-        next(error);
-    }
-};
-
-const createRecord = async (req, res, next) => {
-    try {
-        req.body.user = req.user.id;
-        const crop = await Crop.create(req.body);
-        res.status(201).json({ success: true, data: crop });
-    } catch (error) {
-        next(error);
-    }
-};
-
-const updateRecord = async (req, res, next) => {
-    try {
-        const crop = await Crop.findOneAndUpdate(
-            { _id: req.params.id, user: req.user.id },
-            req.body,
-            { new: true, runValidators: true }
-        );
-
-        if (!crop) {
-            return res.status(404).json({ success: false, message: 'Crop not found' });
-        }
-
-        res.status(200).json({ success: true });
-    } catch (error) {
-        next(error);
-    }
-};
-
-const deleteRecord = async (req, res, next) => {
-    try {
-        const crop = await Crop.findOneAndDelete({ _id: req.params.id, user: req.user.id });
-
-        if (!crop) {
-            return res.status(404).json({ success: false, message: 'Crop not found' });
-        }
-
-        res.status(200).json({ success: true });
-    } catch (error) {
-        next(error);
-    }
-};
-
 // ------------------- PLACEHOLDERS -------------------
 
 const getYieldSummary = async (req, res, next) => {
@@ -930,22 +930,16 @@ const recordSensorData = async (req, res, next) => {
 
 const getDashboard = async (req, res, next) => {
     try {
-        const totalCrops = await Crop.countDocuments({ user: req.user.id });
         const myProducts = await Product.countDocuments({ seller: req.user.id });
         const totalOrders = await Order.countDocuments({
             $or: [{ buyer: req.user.id }, { seller: req.user.id }]
         });
-        const recentCrops = await Crop.find({ user: req.user.id })
-            .sort({ createdAt: -1 })
-            .limit(2);
 
         const stats = {
-            totalCrops,
             totalProducts: myProducts,
             totalOrders,
             role: req.user.role,
             modules: req.user.modules || [],
-            recentCrops
         };
 
         res.status(200).json({ success: true, data: { stats } });
@@ -983,55 +977,6 @@ const getProfile = async (req, res, next) => {
         };
 
         res.status(200).json({ success: true, data });
-    } catch (error) {
-        next(error);
-    }
-};
-
-const updateProfile = async (req, res, next) => {
-    try {
-        const {
-            fullName,
-            phone,
-            state,
-            district,
-            block,
-            village,
-            pincode,
-            fullAddress,
-            farmerProfile,
-            sellerProfile
-        } = req.body;
-
-        const updatePayload = {
-            fullName,
-            phone,
-            state,
-            district,
-            block,
-            village,
-            pincode,
-            fullAddress
-        };
-
-        if (farmerProfile) updatePayload.farmerProfile = farmerProfile;
-        if (sellerProfile) updatePayload.sellerProfile = sellerProfile;
-
-        const user = await User.findByIdAndUpdate(
-            req.user.id,
-            updatePayload,
-            { new: true, runValidators: true }
-        ).select('-password');
-
-        if (!user) {
-            return res.status(404).json({ success: false, message: 'User not found' });
-        }
-
-        res.status(200).json({
-            success: true,
-            message: 'Profile updated successfully',
-            data: user
-        });
     } catch (error) {
         next(error);
     }
@@ -1086,52 +1031,107 @@ const testAddProduct = async (req, res, next) => {
     }
 };
 
-const testAddCrop = async (req, res, next) => {
+// --------- GET ADDRESSES OF USER--------------
+
+const getUserAddresses = async (req, res, next) => {
     try {
-        let dummyFarmer = await User.findOne({
-            $or: [
-                { modules: 'AGRICULTURE' },
-                { 'farmerProfile.isContractFarmer': true }
-            ]
-        });
+        const addresses = await CustomerAddress.find({
+            user: req.user.id
+        }).sort({ isDefault: -1, createdAt: -1 });
 
-        if (!dummyFarmer) {
-            dummyFarmer = await User.create({
-                fullName: 'Test Farmer',
-                email: 'farmer@test.com',
-                phone: '9999999992',
-                password: 'password123',
-                role: 'USER',
-                modules: ['AGRICULTURE'],
-                farmerProfile: {
-                    landSize: 5,
-                    crops: ['Wheat'],
-                    farmingType: 'conventional',
-                    isContractFarmer: false
-                },
-                isVerified: true
-            });
-        }
-
-        req.body.user = dummyFarmer._id;
-
-        if (!req.body.cropName) req.body.cropName = 'Test Crop ' + Math.floor(Math.random() * 100);
-        if (!req.body.sowingDate) req.body.sowingDate = new Date();
-        if (!req.body.expectedHarvestDate) {
-            req.body.expectedHarvestDate = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
-        }
-        if (!req.body.areaCultivated) req.body.areaCultivated = 5;
-        if (!req.body.expectedYield) req.body.expectedYield = 500;
-
-        const crop = await Crop.create(req.body);
-
-        res.status(201).json({
+        res.status(200).json({
             success: true,
-            message: 'Test crop added',
-            data: crop
+            data: addresses
         });
+
     } catch (error) {
         next(error);
+    }
+};
+// --------------MANDI API -------------------
+const getMandiPrices = async (req, res) => {
+    try {
+        const { state, district, market, commodity } = req.query;
+
+        // Build filters for data.gov.in API
+        const params = new URLSearchParams({
+            "api-key": MANDI_API_KEY,
+            format: "json",
+            limit: "100",
+        });
+
+        if (state) params.append("filters[state]", state);
+        if (district) params.append("filters[district]", district);
+        if (market) params.append("filters[market]", market);
+        if (commodity) params.append("filters[commodity]", commodity);
+
+        const url = `${MANDI_BASE_URL}?${params.toString()}`;
+
+        const response = await axios.get(url, { timeout: 10000 });
+
+        // Forward the records to the client
+        res.status(200).json({
+            success: true,
+            records: response.data.records || [],
+            total: response.data.total || 0,
+        });
+    } catch (error) {
+        console.error("Mandi API proxy error:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch mandi prices",
+            error: error.message,
+        });
+    }
+};
+
+const getSellerOrders = async (req, res) => {
+    try {
+        const sellerId = req.user.id;
+
+        // Find all orders that contain at least one item from this seller
+        const orders = await Order.find({
+            "items.seller": sellerId
+        })
+            .populate("items.product", "name price images")
+            .populate("buyer", "name email")
+            .sort({ createdAt: -1 });
+
+        // Transform each order: only keep items belonging to this seller
+        const sanitizedOrders = orders.map(order => {
+            const sellerItems = order.items.filter(
+                item => item.seller.toString() === sellerId
+            );
+            return {
+                id: order._id,
+                buyerName: order.buyer?.name || "Customer",
+                createdAt: order.createdAt,
+                status: order.status, // optional: per‑order status
+                items: sellerItems,
+                total: sellerItems.reduce((sum, item) => sum + (item.price * item.quantity), 0)
+            };
+        });
+
+        // Also compute stats for dashboard
+        const stats = {
+            totalOrders: sanitizedOrders.length,
+            activeProducts: await Product.countDocuments({ seller: sellerId, status: "active" }),
+            monthlyRevenue: await Order.aggregate([
+                { $unwind: "$items" },
+                { $match: { "items.seller": sellerId, createdAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) } } },
+                { $group: { _id: null, total: { $sum: { $multiply: ["$items.price", "$items.quantity"] } } } }
+            ]).then(res => res[0]?.total || 0)
+        };
+
+        res.json({
+            success: true,
+            data: {
+                recentOrders: sanitizedOrders.slice(0, 10), // last 10 orders
+                stats
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
 };
 
@@ -1172,22 +1172,15 @@ module.exports = {
     updateMyProduct,
     deleteMyProduct,
 
-    // Crops
-    getAllRecords,
-    getRecordById,
-    createRecord,
-    updateRecord,
-    deleteRecord,
-    getYieldSummary,
-    getUpcomingTasks,
-    recordSensorData,
 
     // Dashboard & Profile
     getDashboard,
     getProfile,
-    updateProfile,
 
     // Test
     testAddProduct,
-    testAddCrop
+    getUserAddresses,
+    getMandiPrices,
+    // Seller orders
+    getSellerOrders
 };

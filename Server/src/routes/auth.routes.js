@@ -68,8 +68,7 @@ router.put(
     { name: 'profileImage', maxCount: 1 },
     { name: 'profilePicture', maxCount: 1 },
     { name: 'storeLogo', maxCount: 1 },
-  ]),
-  userController.updateProfile
+  ])
 );
 
 // Subordinates - two separate routes (NO OPTIONAL PARAM)

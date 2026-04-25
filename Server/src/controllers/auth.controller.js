@@ -68,7 +68,7 @@ exports.register = async (req, res) => {
       doctorSpecialization, doctorExperience, consultationFee, registrationNumber, bloodGroup,
       allergies, medicalHistory,
       emergencyContactName, emergencyContactRelation, emergencyContactPhone,
-      landSize, crops, cropType, farmingType, isContractFarmer, farmLocation, irrigationType,
+      isContractFarmer, farmLocation, irrigationType,
       className, schoolName, board, percentage,
       projectType, techStack, experience,
       username, bio, interests,
@@ -107,7 +107,7 @@ exports.register = async (req, res) => {
     } else {
       if (finalAadhaar || finalPan || voterId || passportNumber) userModules.push('FINANCE');
       if (bloodGroup || allergies || medicalHistory || emergencyContactName) userModules.push('HEALTHCARE');
-      if (landSize || crops || cropType || farmLocation || irrigationType) userModules.push('AGRICULTURE');
+      if (farmLocation || irrigationType) userModules.push('AGRICULTURE');
       if (className || schoolName || board || percentage) userModules.push('EDUCATION');
       if (projectType || techStack || experience) userModules.push('IT');
       if (username || bio || interests) userModules.push('SOCIAL');
@@ -144,7 +144,6 @@ exports.register = async (req, res) => {
       // New fields initialization
       aiUsage: {
         diseaseDetectionCount: 0,
-        cropDetectionCount: 0,
         aiTokensRemaining: 10,
       },
       mlmPayoutInfo: {
@@ -181,9 +180,6 @@ exports.register = async (req, res) => {
     // Farmer profile
     if (userModules.includes('AGRICULTURE')) {
       userData.farmerProfile = {
-        landSize: landSize ? parseFloat(landSize) : 0,
-        crops: parseArray(crops || cropType),
-        farmingType: farmingType || 'conventional',
         isContractFarmer: isContractFarmer === 'true' || isContractFarmer === true,
         farmLocation: farmLocation || '',
         irrigationType: irrigationType || '',
@@ -615,11 +611,8 @@ exports.updateProfile = async (req, res) => {
     }
 
     // Farmer profile
-    if (req.body.landSize !== undefined || req.body.crops !== undefined || req.body.farmingType !== undefined || req.body.isContractFarmer !== undefined) {
+    if (req.body.isContractFarmer !== undefined) {
       user.farmerProfile = user.farmerProfile || {};
-      if (req.body.landSize !== undefined) user.farmerProfile.landSize = parseFloat(req.body.landSize);
-      if (req.body.crops !== undefined) user.farmerProfile.crops = parseArray(req.body.crops);
-      if (req.body.farmingType !== undefined) user.farmerProfile.farmingType = req.body.farmingType;
       if (req.body.isContractFarmer !== undefined) user.farmerProfile.isContractFarmer = req.body.isContractFarmer === 'true' || req.body.isContractFarmer === true;
       if (req.body.farmLocation !== undefined) user.farmerProfile.farmLocation = req.body.farmLocation;
       if (req.body.irrigationType !== undefined) user.farmerProfile.irrigationType = req.body.irrigationType;
@@ -896,15 +889,13 @@ exports.updateAITokens = async (req, res) => {
 // ======================
 exports.incrementAIUsage = async (req, res) => {
   try {
-    const { type } = req.body; // 'disease' or 'crop'
+    const { type } = req.body; // 'disease'
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     user.aiUsage = user.aiUsage || {};
     if (type === 'disease') {
       user.aiUsage.diseaseDetectionCount = (user.aiUsage.diseaseDetectionCount || 0) + 1;
-    } else if (type === 'crop') {
-      user.aiUsage.cropDetectionCount = (user.aiUsage.cropDetectionCount || 0) + 1;
     }
     user.aiUsage.lastDetectionAt = new Date();
     if (user.aiUsage.aiTokensRemaining > 0) {
@@ -1076,7 +1067,7 @@ exports.addProductListing = async (req, res) => {
 // ======================
 exports.addContractFarming = async (req, res) => {
   try {
-    const { buyerId, crop, quantity, pricePerUnit, startDate, endDate } = req.body;
+    const { buyerId, quantity, pricePerUnit, startDate, endDate } = req.body;
     const farmerId = req.user.id;
     const farmer = await User.findById(farmerId);
     if (!farmer || !farmer.farmerProfile) {
@@ -1087,7 +1078,6 @@ exports.addContractFarming = async (req, res) => {
 
     const agreement = {
       buyerId,
-      crop,
       quantity: parseFloat(quantity),
       pricePerUnit: parseFloat(pricePerUnit),
       startDate: new Date(startDate),
