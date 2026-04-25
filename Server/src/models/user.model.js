@@ -284,6 +284,7 @@ const userSchema = new mongoose.Schema(
       creatorStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
       totalPosts: { type: Number, default: 0 },
       totalFollowers: { type: Number, default: 0 },
+      totalFollowing: { type: Number, default: 0 },
       monetizationEarnings: { type: Number, default: 0 },
       liveStreamingKey: String,
     },
