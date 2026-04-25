@@ -78,6 +78,9 @@ const userSchema = new mongoose.Schema(
     motherName: { type: String, trim: true },
     dob: Date,
     gender: { type: String, enum: ['male', 'female', 'other'] },
+    bloodGroup: { type: String, trim: true },
+    allergies: { type: String, trim: true },
+    medicalHistory: { type: String, trim: true },
 
     // ========== KYC & ADDRESS ==========
     aadhaarNumber: {
@@ -97,6 +100,8 @@ const userSchema = new mongoose.Schema(
       default: null,
       set: v => (v === '' ? null : v),
     },
+    voterId: { type: String, unique: true, sparse: true, trim: true },
+    passportNumber: { type: String, unique: true, sparse: true, trim: true },
     aadhaarImage: String,
     panImage: String,
     state: { type: String, trim: true },
@@ -106,15 +111,31 @@ const userSchema = new mongoose.Schema(
     pincode: { type: String, match: [/^\d{6}$/, 'Pincode must be 6 digits'] },
     fullAddress: { type: String, trim: true },
     profileImage: String,
+    profilePicture: String,   // additional field
     signature: String,
 
+    // ========== EMERGENCY CONTACT ==========
+    emergencyContact: {
+      name: { type: String, trim: true },
+      relationship: { type: String, trim: true },
+      phone: { type: String, trim: true },
+    },
+
     // ========== EDUCATION MODULE ==========
+    // For teachers
     teacherProfile: {
       specialization: { type: String, trim: true },
       qualifications: [String],
       experienceYears: { type: Number, min: 0, default: 0 },
       taughtCourses: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Course' }],
       earnings: { type: Number, default: 0 },
+    },
+    // For students
+    educationProfile: {
+      className: { type: String, trim: true },
+      schoolName: { type: String, trim: true },
+      board: { type: String, trim: true },
+      percentage: { type: String, trim: true },
     },
     enrolledCourses: [
       {
@@ -159,6 +180,7 @@ const userSchema = new mongoose.Schema(
     },
     patients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     appointments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Appointment' }],
+    // Health records as sub‑documents (not references)
     healthRecords: [
       {
         recordType: { type: String, enum: ['lab_report', 'diagnosis', 'vaccination', 'surgery'] },
@@ -177,8 +199,23 @@ const userSchema = new mongoose.Schema(
       crops: [String],
       farmingType: { type: String, enum: ['organic', 'conventional', 'mixed'], default: 'conventional' },
       isContractFarmer: { type: Boolean, default: false },
+      farmLocation: { type: String, trim: true },      // added
+      irrigationType: { type: String, trim: true },    // added
     },
-    productListings: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
+    // Product listings as sub‑documents (not references)
+    productListings: [
+      {
+        name: String,
+        price: Number,
+        quantity: Number,
+        unit: String,
+        category: String,
+        description: String,
+        imageUrl: String,
+        sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
     contractFarmingAgreements: [
       {
         buyerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -201,6 +238,7 @@ const userSchema = new mongoose.Schema(
       accountHolderName: { type: String, trim: true },
     },
     transactions: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }],
+    // Loans as sub‑documents
     loans: [
       {
         amount: Number,
@@ -217,6 +255,28 @@ const userSchema = new mongoose.Schema(
     // ========== MLM / COMMISSION ==========
     commissionRate: { type: Number, default: 0, min: 0, max: 100 },
     totalCommissionEarned: { type: Number, default: 0 },
+    mlmPayoutInfo: {
+      lastPayoutDate: Date,
+      nextPayoutDate: Date,
+      pendingCommission: { type: Number, default: 0, min: 0 },
+      totalWithdrawn: { type: Number, default: 0, min: 0 },
+    },
+
+    // ========== SOCIAL MODULE ==========
+    socialProfile: {
+      username: { type: String, trim: true, unique: true, sparse: true },
+      bio: { type: String, trim: true },
+      interests: { type: String, trim: true },
+      followersCount: { type: Number, default: 0 },
+      followingCount: { type: Number, default: 0 },
+    },
+
+    // ========== IT MODULE ==========
+    itProfile: {
+      projectType: { type: String, trim: true },
+      techStack: { type: String, trim: true },
+      experience: { type: String, trim: true },
+    },
 
     // ========== NEWS & MEDIA MODULE ==========
     mediaCreatorProfile: {
@@ -230,8 +290,32 @@ const userSchema = new mongoose.Schema(
     mediaPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MediaPost' }],
 
     // ========== CRM & IT MODULE ==========
-    clients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Client' }],
-    projects: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Project' }],
+    // Clients and Projects as sub‑documents (controller pushes direct objects)
+    clients: [
+      {
+        name: String,
+        email: String,
+        phone: String,
+        company: String,
+        gstNumber: String,
+        address: String,
+        createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    projects: [
+      {
+        name: String,
+        description: String,
+        clientId: String,   // can be ObjectId or string
+        startDate: Date,
+        endDate: Date,
+        budget: Number,
+        status: { type: String, default: 'active' },
+        createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
 
     // ========== E‑COMMERCE / VILLAGE STORE ==========
     sellerProfile: {
@@ -241,7 +325,18 @@ const userSchema = new mongoose.Schema(
       storeLogo: String,
       rating: { type: Number, default: 0, min: 0, max: 5 },
     },
-    storeProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'StoreProduct' }],
+    storeProducts: [
+      {
+        name: String,
+        price: Number,
+        category: String,
+        stock: Number,
+        description: String,
+        imageUrl: String,
+        sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
     exchangeRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'ExchangeRequest' }],
 
     // ========== SUBSCRIPTION & OTP ==========
@@ -259,7 +354,7 @@ const userSchema = new mongoose.Schema(
         startDate: Date,
         endDate: Date,
         amountPaid: Number,
-        transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
+        transactionId: String,
       },
     ],
 
@@ -269,14 +364,6 @@ const userSchema = new mongoose.Schema(
       cropDetectionCount: { type: Number, default: 0 },
       lastDetectionAt: Date,
       aiTokensRemaining: { type: Number, default: 10 },
-    },
-
-    // ========== MLM PAYOUT INFO ==========
-    mlmPayoutInfo: {
-      lastPayoutDate: Date,
-      nextPayoutDate: Date,
-      pendingCommission: { type: Number, default: 0, min: 0 },
-      totalWithdrawn: { type: Number, default: 0, min: 0 },
     },
 
     // ========== SECURITY & AUDIT ==========
@@ -317,6 +404,8 @@ userSchema.index({ lastLogin: -1 });
 userSchema.index({ 'mediaCreatorProfile.isCreator': 1 });
 userSchema.index({ 'sellerProfile.isSeller': 1 });
 userSchema.index({ isDeleted: 1 });
+userSchema.index({ email: 1 });
+userSchema.index({ phone: 1 });
 
 // ========== STATIC METHOD: Generate Unique Referral Code ==========
 userSchema.statics.generateUniqueReferralCode = async function () {
@@ -330,7 +419,7 @@ userSchema.statics.generateUniqueReferralCode = async function () {
   return code;
 };
 
-// ========== PRE‑SAVE HOOKS (FIXED - No `next` parameter) ==========
+// ========== PRE‑SAVE HOOKS ==========
 userSchema.pre('save', async function () {
   // Hash password if modified
   if (this.isModified('password')) {

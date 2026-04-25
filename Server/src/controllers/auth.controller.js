@@ -5,22 +5,13 @@ const sendEmail = require('../utils/sendEmail');
 const path = require('path');
 const fs = require('fs').promises;
 const { validationResult } = require('express-validator');
+const crypto = require('crypto'); // for secure OTP
 
-// Complete roles list (matching model)
+// Constants
 const VALID_ROLES = [
-  'SUPER_ADMIN',
-  'ADDITIONAL_DIRECTOR',
-  'STATE_OFFICER',
-  'DISTRICT_MANAGER',
-  'DISTRICT_PRESIDENT',
-  'FIELD_OFFICER',
-  'BLOCK_OFFICER',
-  'VILLAGE_OFFICER',
-  'DOCTOR',
-  'TEACHER',
-  'AGENT',
-  'USER',
-  'ADMIN'
+  'SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_OFFICER', 'DISTRICT_MANAGER',
+  'DISTRICT_PRESIDENT', 'FIELD_OFFICER', 'BLOCK_OFFICER', 'VILLAGE_OFFICER',
+  'DOCTOR', 'TEACHER', 'AGENT', 'USER', 'ADMIN'
 ];
 
 const uploadDir = path.join(__dirname, '../uploads');
@@ -32,14 +23,11 @@ const uploadDir = path.join(__dirname, '../uploads');
   }
 })();
 
-const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
-const hashOTP = async (otp) => {
-  const salt = await bcrypt.genSalt(10);
-  return bcrypt.hash(otp, salt);
-};
+// Helpers
+const generateOTP = () => crypto.randomInt(100000, 999999).toString();
+const hashOTP = async (otp) => bcrypt.hash(otp, 10);
 const verifyOTP = async (plainOtp, hashedOtp) => bcrypt.compare(plainOtp, hashedOtp);
 
-// Helper to parse comma-separated string to array
 const parseArray = (value) => {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -47,9 +35,7 @@ const parseArray = (value) => {
   return [];
 };
 
-// ======================
-// REGISTER
-// ======================
+// ---------- REGISTER ----------
 exports.register = async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -141,7 +127,6 @@ exports.register = async (req, res) => {
       sponsorId: sponsorId || null,
       createdBy: req.user ? req.user.id : null,
       updatedBy: req.user ? req.user.id : null,
-      // New fields initialization
       aiUsage: {
         diseaseDetectionCount: 0,
         cropDetectionCount: 0,
@@ -158,7 +143,7 @@ exports.register = async (req, res) => {
       qaStatus: qaStatus || 'pending',
     };
 
-    // Teacher profile
+    // Profile specific
     if (mappedRole === 'TEACHER' || userModules.includes('EDUCATION')) {
       userData.teacherProfile = {
         specialization: specialization || '',
@@ -167,8 +152,6 @@ exports.register = async (req, res) => {
         earnings: 0,
       };
     }
-
-    // Doctor profile
     if (mappedRole === 'DOCTOR' || userModules.includes('HEALTHCARE')) {
       userData.doctorProfile = {
         specialization: doctorSpecialization || '',
@@ -177,8 +160,6 @@ exports.register = async (req, res) => {
         registrationNumber: registrationNumber || '',
       };
     }
-
-    // Farmer profile
     if (userModules.includes('AGRICULTURE')) {
       userData.farmerProfile = {
         landSize: landSize ? parseFloat(landSize) : 0,
@@ -189,8 +170,6 @@ exports.register = async (req, res) => {
         irrigationType: irrigationType || '',
       };
     }
-
-    // Education profile (for students)
     if (userModules.includes('EDUCATION')) {
       userData.educationProfile = {
         className: className || '',
@@ -199,8 +178,6 @@ exports.register = async (req, res) => {
         percentage: percentage || '',
       };
     }
-
-    // IT profile
     if (userModules.includes('IT')) {
       userData.itProfile = {
         projectType: projectType || '',
@@ -208,8 +185,6 @@ exports.register = async (req, res) => {
         experience: experience || '',
       };
     }
-
-    // Social profile
     if (userModules.includes('SOCIAL')) {
       userData.socialProfile = {
         username: username || '',
@@ -219,8 +194,6 @@ exports.register = async (req, res) => {
         followingCount: 0,
       };
     }
-
-    // Media creator profile
     if (userModules.includes('MEDIA') || isMediaCreator === 'true' || isMediaCreator === true) {
       userData.mediaCreatorProfile = {
         isCreator: true,
@@ -228,11 +201,9 @@ exports.register = async (req, res) => {
         totalPosts: 0,
         totalFollowers: 0,
         monetizationEarnings: 0,
-        liveStreamingKey: Math.random().toString(36).substring(2, 15),
+        liveStreamingKey: crypto.randomBytes(8).toString('hex'),
       };
     }
-
-    // Seller profile
     if (userModules.includes('ECOMMERCE') || isSeller === 'true' || isSeller === true) {
       userData.sellerProfile = {
         isSeller: true,
@@ -241,8 +212,6 @@ exports.register = async (req, res) => {
         rating: 0,
       };
     }
-
-    // Bank account
     if (bankAccount) {
       try {
         userData.bankAccount = typeof bankAccount === 'string' ? JSON.parse(bankAccount) : bankAccount;
@@ -250,21 +219,19 @@ exports.register = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid bankAccount JSON' });
       }
     }
-
-    // Agent commission rate
     if (mappedRole === 'AGENT' && commissionRate !== undefined) {
       userData.commissionRate = parseFloat(commissionRate);
     }
 
     const user = new User(userData);
 
-    // Handle file uploads
+    // File uploads
     if (req.files) {
       const moveFile = async (fieldName, prefix) => {
         const file = req.files[fieldName]?.[0];
         if (file) {
           const ext = path.extname(file.originalname);
-          const fileName = `${Date.now()}_${prefix}_${Math.random().toString(36).substring(2)}${ext}`;
+          const fileName = `${Date.now()}_${prefix}_${crypto.randomBytes(6).toString('hex')}${ext}`;
           const newPath = path.join(uploadDir, fileName);
           await fs.rename(file.path, newPath);
           user[fieldName] = `/uploads/${fileName}`;
@@ -288,11 +255,11 @@ exports.register = async (req, res) => {
       email: user.email,
     });
   } catch (error) {
-    console.error('Register error:', error);
+    // Cleanup
     if (req.files) {
       for (const field in req.files) {
         for (const file of req.files[field]) {
-          await fs.unlink(file.path).catch(() => { });
+          await fs.unlink(file.path).catch(() => {});
         }
       }
     }
@@ -304,9 +271,7 @@ exports.register = async (req, res) => {
   }
 };
 
-// ======================
-// VERIFY OTP
-// ======================
+// ---------- VERIFY OTP ----------
 exports.verifyOTP = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -342,9 +307,7 @@ exports.verifyOTP = async (req, res) => {
   }
 };
 
-// ======================
-// RESEND OTP
-// ======================
+// ---------- RESEND OTP ----------
 exports.resendOTP = async (req, res) => {
   try {
     const { email } = req.body;
@@ -364,55 +327,26 @@ exports.resendOTP = async (req, res) => {
   }
 };
 
-// ======================
-// LOGIN
-// ======================
-// ======================
-// LOGIN (with debug)
-// ======================
+// ---------- LOGIN ----------
 exports.login = async (req, res) => {
-  console.log('>>> Login endpoint hit');
   try {
     const { email, password } = req.body;
-    console.log('>>> Email:', email);
-
     if (!email || !password) {
-      console.log('>>> Missing credentials');
       return res.status(400).json({ success: false, message: 'Email and password required' });
     }
 
-    console.log('>>> Finding user...');
     const user = await User.findOne({ email });
-    if (!user) {
-      console.log('>>> User not found');
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-    console.log('>>> User found:', user._id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.isDeleted) return res.status(403).json({ success: false, message: 'Account is deactivated' });
+    if (!user.isVerified) return res.status(403).json({ success: false, message: 'Please verify your email first' });
 
-    if (user.isDeleted) {
-      console.log('>>> User is soft deleted');
-      return res.status(403).json({ success: false, message: 'Account is deactivated' });
-    }
-
-    if (!user.isVerified) {
-      console.log('>>> User not verified');
-      return res.status(403).json({ success: false, message: 'Please verify your email first' });
-    }
-
-    console.log('>>> Comparing password...');
     const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      console.log('>>> Password mismatch');
-      return res.status(400).json({ success: false, message: 'Invalid credentials' });
+    if (!isMatch) return res.status(400).json({ success: false, message: 'Invalid credentials' });
+
+    if (typeof user.updateLastLogin === 'function') {
+      await user.updateLastLogin(req.ip, req.headers['user-agent']);
     }
-    console.log('>>> Password matched');
 
-    console.log('>>> Calling updateLastLogin...');
-    console.log('>>> typeof user.updateLastLogin:', typeof user.updateLastLogin);
-    await user.updateLastLogin(req.ip, req.headers['user-agent']);
-    console.log('>>> Last login updated');
-
-    console.log('>>> Generating token...');
     const token = jwt.sign(
       { id: user._id, role: user.role, modules: user.modules },
       process.env.JWT_SECRET,
@@ -424,18 +358,14 @@ exports.login = async (req, res) => {
     delete userData.otp;
     delete userData.otpExpire;
 
-    console.log('>>> Login successful, sending response');
     res.json({ success: true, message: 'Login successful', token, user: userData });
   } catch (error) {
-    console.error('>>> LOGIN ERROR:', error);
-    console.error('>>> Error stack:', error.stack);
+    console.error('Login error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// ======================
-// FORGOT PASSWORD - SEND OTP
-// ======================
+// ---------- FORGOT PASSWORD ----------
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -451,17 +381,13 @@ exports.forgotPassword = async (req, res) => {
     await user.save();
 
     await sendEmail(email, otp).catch(err => console.error('Email error:', err));
-    console.log(`OTP for ${email}: ${otp}`); // For development
-
     res.json({ success: true, message: 'OTP sent to your email' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// ======================
-// VERIFY OTP FOR PASSWORD RESET
-// ======================
+// ---------- VERIFY RESET OTP ----------
 exports.verifyResetOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -482,9 +408,7 @@ exports.verifyResetOtp = async (req, res) => {
   }
 };
 
-// ======================
-// RESET PASSWORD
-// ======================
+// ---------- RESET PASSWORD ----------
 exports.resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
@@ -510,9 +434,7 @@ exports.resetPassword = async (req, res) => {
   }
 };
 
-// ======================
-// GET PROFILE
-// ======================
+// ---------- GET PROFILE ----------
 exports.getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user.id)
@@ -523,43 +445,54 @@ exports.getProfile = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     res.json({ success: true, user });
   } catch (error) {
-    console.error('Get profile error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ======================
-// UPDATE PROFILE
-// ======================
+// ---------- UPDATE PROFILE (FIXED) ----------
 exports.updateProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-    const moveFile = async (fieldName, prefix) => {
-      const file = req.files?.[fieldName]?.[0];
-      if (file) {
-        if (user[fieldName]) {
-          const oldPath = path.join(__dirname, '../', user[fieldName]);
-          await fs.unlink(oldPath).catch(() => { });
-        }
-        const ext = path.extname(file.originalname);
-        const fileName = `${Date.now()}_${prefix}_${Math.random().toString(36).substring(2)}${ext}`;
-        const newPath = path.join(uploadDir, fileName);
-        await fs.rename(file.path, newPath);
-        user[fieldName] = `/uploads/${fileName}`;
-        return fileName;
-      }
-      return null;
-    };
-
-    await moveFile('profileImage', 'profile');
-    await moveFile('profilePicture', 'profile');
-    const logoFileName = await moveFile('storeLogo', 'store_logo');
-    if (logoFileName && user.sellerProfile) {
-      user.sellerProfile.storeLogo = `/uploads/${logoFileName}`;
+    const userId = req.user.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
 
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Helper to move uploaded file
+    const moveFile = async (fieldName, prefix, oldPathField = null) => {
+      const file = req.files?.[fieldName]?.[0];
+      if (!file) return null;
+
+      if (oldPathField && user[oldPathField]) {
+        const oldFilePath = path.join(__dirname, '../..', user[oldPathField]);
+        await fs.unlink(oldFilePath).catch(() => {});
+      }
+
+      const ext = path.extname(file.originalname);
+      const fileName = `${Date.now()}_${prefix}_${crypto.randomBytes(6).toString('hex')}${ext}`;
+      const newPath = path.join(uploadDir, fileName);
+      await fs.rename(file.path, newPath);
+      return `/uploads/${fileName}`;
+    };
+
+    // Files
+    const newProfileImage = await moveFile('profileImage', 'profile', 'profileImage');
+    if (newProfileImage) user.profileImage = newProfileImage;
+
+    const newProfilePicture = await moveFile('profilePicture', 'profile', 'profilePicture');
+    if (newProfilePicture) user.profilePicture = newProfilePicture;
+
+    const newStoreLogo = await moveFile('storeLogo', 'store_logo', 'storeLogo');
+    if (newStoreLogo) {
+      user.storeLogo = newStoreLogo;
+      if (user.sellerProfile) user.sellerProfile.storeLogo = newStoreLogo;
+    }
+
+    // Simple fields
     const simpleFields = [
       'fullName', 'phone', 'fatherName', 'motherName', 'dob', 'gender',
       'state', 'district', 'block', 'village', 'pincode', 'fullAddress',
@@ -567,90 +500,80 @@ exports.updateProfile = async (req, res) => {
       'voterId', 'passportNumber'
     ];
     for (const key of simpleFields) {
-      if (req.body[key] !== undefined) user[key] = req.body[key];
+      if (req.body[key] !== undefined && req.body[key] !== '') {
+        if (key === 'dob') {
+          const date = new Date(req.body[key]);
+          if (!isNaN(date.getTime())) user[key] = date;
+        } else {
+          user[key] = req.body[key];
+        }
+      }
     }
 
-    // Update new fields (some admin-only in practice but we allow for completeness)
-    if (req.body.twoFactorEnabled !== undefined) {
-      user.twoFactorEnabled = req.body.twoFactorEnabled === 'true' || req.body.twoFactorEnabled === true;
-    }
-    if (req.body.developedBy !== undefined) user.developedBy = req.body.developedBy;
-    if (req.body.testedBy !== undefined) user.testedBy = req.body.testedBy;
-    if (req.body.qaStatus !== undefined) user.qaStatus = req.body.qaStatus;
-
-    // AI token replenish (admin only)
-    if (req.body.aiTokensRemaining !== undefined && req.user.role === 'SUPER_ADMIN') {
-      user.aiUsage = user.aiUsage || {};
-      user.aiUsage.aiTokensRemaining = parseInt(req.body.aiTokensRemaining);
-    }
-
-    // Media creator status (admin only)
-    if (req.body.creatorStatus !== undefined && req.user.role === 'SUPER_ADMIN' && user.mediaCreatorProfile) {
-      user.mediaCreatorProfile.creatorStatus = req.body.creatorStatus;
-    }
-
-    if (req.body.emergencyContactName || req.body.emergencyContactRelation || req.body.emergencyContactPhone) {
+    // Emergency contact – merge
+    if (req.body.emergencyContactName !== undefined ||
+        req.body.emergencyContactRelation !== undefined ||
+        req.body.emergencyContactPhone !== undefined) {
       user.emergencyContact = {
-        name: req.body.emergencyContactName || user.emergencyContact?.name,
-        relationship: req.body.emergencyContactRelation || user.emergencyContact?.relationship,
-        phone: req.body.emergencyContactPhone || user.emergencyContact?.phone,
+        name: req.body.emergencyContactName ?? user.emergencyContact?.name,
+        relationship: req.body.emergencyContactRelation ?? user.emergencyContact?.relationship,
+        phone: req.body.emergencyContactPhone ?? user.emergencyContact?.phone,
       };
     }
 
-    // Teacher profile
+    // Module sync (add modules based on data)
+    let currentModules = user.modules || [];
+    const modulesToAdd = [];
+    if (user.aadhaarNumber || user.panNumber || user.voterId || user.passportNumber) modulesToAdd.push('FINANCE');
+    if (user.bloodGroup || user.allergies || user.medicalHistory || user.emergencyContact?.name) modulesToAdd.push('HEALTHCARE');
+    if (user.farmerProfile || req.body.landSize || req.body.crops || req.body.farmLocation) modulesToAdd.push('AGRICULTURE');
+    if (user.educationProfile || req.body.className || req.body.schoolName) modulesToAdd.push('EDUCATION');
+    if (user.itProfile || req.body.projectType || req.body.techStack) modulesToAdd.push('IT');
+    if (user.socialProfile || req.body.username || req.body.bio) modulesToAdd.push('SOCIAL');
+    if (user.mediaCreatorProfile || req.body.isMediaCreator === 'true') modulesToAdd.push('MEDIA');
+    if (user.sellerProfile || req.body.isSeller === 'true') modulesToAdd.push('ECOMMERCE');
+    modulesToAdd.forEach(mod => { if (!currentModules.includes(mod)) currentModules.push(mod); });
+    user.modules = currentModules;
+
+    // Profile-specific updates
     if (req.body.teacherSpecialization !== undefined || req.body.qualifications !== undefined || req.body.teacherExperience !== undefined) {
-      user.teacherProfile = user.teacherProfile || {};
+      if (!user.teacherProfile) user.teacherProfile = {};
       if (req.body.teacherSpecialization !== undefined) user.teacherProfile.specialization = req.body.teacherSpecialization;
       if (req.body.qualifications !== undefined) user.teacherProfile.qualifications = parseArray(req.body.qualifications);
       if (req.body.teacherExperience !== undefined) user.teacherProfile.experienceYears = parseInt(req.body.teacherExperience);
     }
-
-    // Doctor profile
-    if (req.body.doctorSpecialization !== undefined || req.body.doctorExperience !== undefined || req.body.consultationFee !== undefined || req.body.registrationNumber !== undefined) {
-      user.doctorProfile = user.doctorProfile || {};
+    if (req.body.doctorSpecialization !== undefined || req.body.doctorExperience !== undefined || req.body.consultationFee !== undefined) {
+      if (!user.doctorProfile) user.doctorProfile = {};
       if (req.body.doctorSpecialization !== undefined) user.doctorProfile.specialization = req.body.doctorSpecialization;
       if (req.body.doctorExperience !== undefined) user.doctorProfile.experienceYears = parseInt(req.body.doctorExperience);
       if (req.body.consultationFee !== undefined) user.doctorProfile.consultationFee = parseFloat(req.body.consultationFee);
-      if (req.body.registrationNumber !== undefined) user.doctorProfile.registrationNumber = req.body.registrationNumber;
     }
-
-    // Farmer profile
-    if (req.body.landSize !== undefined || req.body.crops !== undefined || req.body.farmingType !== undefined || req.body.isContractFarmer !== undefined) {
-      user.farmerProfile = user.farmerProfile || {};
+    if (req.body.landSize !== undefined || req.body.crops !== undefined || req.body.farmingType !== undefined) {
+      if (!user.farmerProfile) user.farmerProfile = {};
       if (req.body.landSize !== undefined) user.farmerProfile.landSize = parseFloat(req.body.landSize);
       if (req.body.crops !== undefined) user.farmerProfile.crops = parseArray(req.body.crops);
       if (req.body.farmingType !== undefined) user.farmerProfile.farmingType = req.body.farmingType;
       if (req.body.isContractFarmer !== undefined) user.farmerProfile.isContractFarmer = req.body.isContractFarmer === 'true' || req.body.isContractFarmer === true;
-      if (req.body.farmLocation !== undefined) user.farmerProfile.farmLocation = req.body.farmLocation;
-      if (req.body.irrigationType !== undefined) user.farmerProfile.irrigationType = req.body.irrigationType;
     }
-
-    // Education profile
-    if (req.body.className !== undefined || req.body.schoolName !== undefined || req.body.board !== undefined || req.body.percentage !== undefined) {
-      user.educationProfile = user.educationProfile || {};
+    if (req.body.className !== undefined || req.body.schoolName !== undefined || req.body.board !== undefined) {
+      if (!user.educationProfile) user.educationProfile = {};
       if (req.body.className !== undefined) user.educationProfile.className = req.body.className;
       if (req.body.schoolName !== undefined) user.educationProfile.schoolName = req.body.schoolName;
       if (req.body.board !== undefined) user.educationProfile.board = req.body.board;
       if (req.body.percentage !== undefined) user.educationProfile.percentage = req.body.percentage;
     }
-
-    // IT profile
-    if (req.body.projectType !== undefined || req.body.techStack !== undefined || req.body.experience !== undefined) {
-      user.itProfile = user.itProfile || {};
+    if (req.body.projectType !== undefined || req.body.techStack !== undefined) {
+      if (!user.itProfile) user.itProfile = {};
       if (req.body.projectType !== undefined) user.itProfile.projectType = req.body.projectType;
       if (req.body.techStack !== undefined) user.itProfile.techStack = req.body.techStack;
       if (req.body.experience !== undefined) user.itProfile.experience = req.body.experience;
     }
-
-    // Social profile
-    if (req.body.username !== undefined || req.body.bio !== undefined || req.body.interests !== undefined) {
-      user.socialProfile = user.socialProfile || {};
+    if (req.body.username !== undefined || req.body.bio !== undefined) {
+      if (!user.socialProfile) user.socialProfile = {};
       if (req.body.username !== undefined) user.socialProfile.username = req.body.username;
       if (req.body.bio !== undefined) user.socialProfile.bio = req.body.bio;
       if (req.body.interests !== undefined) user.socialProfile.interests = req.body.interests;
     }
-
-    // Media creator profile
     if (req.body.isMediaCreator !== undefined) {
       const isCreator = req.body.isMediaCreator === 'true' || req.body.isMediaCreator === true;
       if (isCreator && !user.mediaCreatorProfile) {
@@ -660,17 +583,12 @@ exports.updateProfile = async (req, res) => {
           totalPosts: 0,
           totalFollowers: 0,
           monetizationEarnings: 0,
-          liveStreamingKey: Math.random().toString(36).substring(2, 15),
+          liveStreamingKey: crypto.randomBytes(8).toString('hex'),
         };
-      } else if (!isCreator) {
+      } else if (!isCreator && user.mediaCreatorProfile) {
         user.mediaCreatorProfile = null;
       }
     }
-    if (req.body.mediaBio !== undefined && user.mediaCreatorProfile) {
-      user.mediaCreatorProfile.bio = req.body.mediaBio;
-    }
-
-    // Seller profile
     if (req.body.isSeller !== undefined) {
       const isSeller = req.body.isSeller === 'true' || req.body.isSeller === true;
       if (isSeller && !user.sellerProfile) {
@@ -680,26 +598,19 @@ exports.updateProfile = async (req, res) => {
           gstNumber: req.body.gstNumber || '',
           rating: 0,
         };
-      } else if (!isSeller) {
+      } else if (!isSeller && user.sellerProfile) {
         user.sellerProfile = null;
       } else if (user.sellerProfile) {
         if (req.body.storeName) user.sellerProfile.storeName = req.body.storeName;
         if (req.body.gstNumber) user.sellerProfile.gstNumber = req.body.gstNumber;
       }
     }
-
-    // Bank account
-    if (req.body.bankAccount !== undefined) {
+    if (req.body.bankAccount) {
       try {
         user.bankAccount = typeof req.body.bankAccount === 'string' ? JSON.parse(req.body.bankAccount) : req.body.bankAccount;
       } catch (e) {
         return res.status(400).json({ success: false, message: 'Invalid bankAccount JSON' });
       }
-    }
-
-    // Agent commission rate
-    if (req.body.commissionRate !== undefined && user.role === 'AGENT') {
-      user.commissionRate = parseFloat(req.body.commissionRate);
     }
 
     user.updatedBy = req.user.id;
@@ -710,12 +621,13 @@ exports.updateProfile = async (req, res) => {
     delete userData.otp;
     delete userData.otpExpire;
 
-    res.json({ success: true, message: 'Profile updated', user: userData });
+    res.json({ success: true, message: 'Profile updated successfully', user: userData });
   } catch (error) {
+    // Cleanup temp files
     if (req.files) {
       for (const field in req.files) {
         for (const file of req.files[field]) {
-          await fs.unlink(file.path).catch(() => { });
+          await fs.unlink(file.path).catch(() => {});
         }
       }
     }
@@ -723,13 +635,12 @@ exports.updateProfile = async (req, res) => {
       const messages = Object.values(error.errors).map(e => e.message);
       return res.status(400).json({ success: false, message: messages.join(', ') });
     }
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Update profile error:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ======================
-// ASSIGN HIERARCHY
-// ======================
+// ---------- ASSIGN HIERARCHY ----------
 exports.assignReporting = async (req, res) => {
   try {
     const { userId, reportsToId, sponsorId } = req.body;
@@ -756,9 +667,7 @@ exports.assignReporting = async (req, res) => {
   }
 };
 
-// ======================
-// GET SUBORDINATES
-// ======================
+// ---------- GET SUBORDINATES ----------
 exports.getSubordinates = async (req, res) => {
   try {
     const userId = req.params.id || req.user.id;
@@ -778,19 +687,14 @@ exports.getSubordinates = async (req, res) => {
   }
 };
 
-// ======================
-// GET ALL USERS (Admin)
-// ======================
+// ---------- GET ALL USERS (Admin) ----------
 exports.getAllUsers = async (req, res) => {
   try {
     const { role, isVerified, page = 1, limit = 20, includeDeleted } = req.query;
     const filter = {};
     if (role) filter.role = role;
     if (isVerified !== undefined) filter.isVerified = isVerified === 'true';
-    // By default exclude soft deleted users
-    if (includeDeleted !== 'true') {
-      filter.isDeleted = false;
-    }
+    if (includeDeleted !== 'true') filter.isDeleted = false;
 
     const users = await User.find(filter)
       .select('-password -otp -otpExpire')
@@ -811,9 +715,7 @@ exports.getAllUsers = async (req, res) => {
   }
 };
 
-// ======================
-// GET USER BY ID (Admin)
-// ======================
+// ---------- GET USER BY ID (Admin) ----------
 exports.getUserById = async (req, res) => {
   try {
     const user = await User.findById(req.params.id)
@@ -827,9 +729,7 @@ exports.getUserById = async (req, res) => {
   }
 };
 
-// ======================
-// DELETE USER (Admin) - Soft delete by default
-// ======================
+// ---------- DELETE USER (soft/hard) ----------
 exports.deleteUser = async (req, res) => {
   try {
     const { hardDelete } = req.query;
@@ -837,15 +737,13 @@ exports.deleteUser = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     if (hardDelete === 'true') {
-      // Permanent delete
       if (user.profileImage) {
-        const filePath = path.join(__dirname, '../', user.profileImage);
-        await fs.unlink(filePath).catch(() => { });
+        const filePath = path.join(__dirname, '../..', user.profileImage);
+        await fs.unlink(filePath).catch(() => {});
       }
       await User.findByIdAndDelete(req.params.id);
       res.json({ success: true, message: 'User permanently deleted' });
     } else {
-      // Soft delete
       user.isDeleted = true;
       user.deletedAt = new Date();
       user.isActive = false;
@@ -857,9 +755,7 @@ exports.deleteUser = async (req, res) => {
   }
 };
 
-// ======================
-// RESTORE USER (Undelete)
-// ======================
+// ---------- RESTORE USER ----------
 exports.restoreUser = async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
@@ -874,9 +770,7 @@ exports.restoreUser = async (req, res) => {
   }
 };
 
-// ======================
-// UPDATE AI TOKENS (Admin)
-// ======================
+// ---------- UPDATE AI TOKENS ----------
 exports.updateAITokens = async (req, res) => {
   try {
     const { userId, tokens } = req.body;
@@ -891,25 +785,18 @@ exports.updateAITokens = async (req, res) => {
   }
 };
 
-// ======================
-// INCREMENT AI USAGE (Internal use)
-// ======================
+// ---------- INCREMENT AI USAGE ----------
 exports.incrementAIUsage = async (req, res) => {
   try {
-    const { type } = req.body; // 'disease' or 'crop'
+    const { type } = req.body;
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     user.aiUsage = user.aiUsage || {};
-    if (type === 'disease') {
-      user.aiUsage.diseaseDetectionCount = (user.aiUsage.diseaseDetectionCount || 0) + 1;
-    } else if (type === 'crop') {
-      user.aiUsage.cropDetectionCount = (user.aiUsage.cropDetectionCount || 0) + 1;
-    }
+    if (type === 'disease') user.aiUsage.diseaseDetectionCount = (user.aiUsage.diseaseDetectionCount || 0) + 1;
+    else if (type === 'crop') user.aiUsage.cropDetectionCount = (user.aiUsage.cropDetectionCount || 0) + 1;
     user.aiUsage.lastDetectionAt = new Date();
-    if (user.aiUsage.aiTokensRemaining > 0) {
-      user.aiUsage.aiTokensRemaining -= 1;
-    }
+    if (user.aiUsage.aiTokensRemaining > 0) user.aiUsage.aiTokensRemaining -= 1;
     await user.save();
     res.json({ success: true, aiUsage: user.aiUsage });
   } catch (error) {
@@ -917,9 +804,7 @@ exports.incrementAIUsage = async (req, res) => {
   }
 };
 
-// ======================
-// ADD SUBSCRIPTION HISTORY
-// ======================
+// ---------- ADD SUBSCRIPTION HISTORY ----------
 exports.addSubscriptionHistory = async (req, res) => {
   try {
     const { userId, plan, startDate, endDate, amountPaid, transactionId } = req.body;
@@ -933,7 +818,6 @@ exports.addSubscriptionHistory = async (req, res) => {
       amountPaid,
       transactionId,
     });
-    // Also update activeSubscription if it's current
     user.activeSubscription = {
       plan,
       expiresAt: new Date(endDate),
@@ -946,9 +830,7 @@ exports.addSubscriptionHistory = async (req, res) => {
   }
 };
 
-// ======================
-// UPDATE MLM PAYOUT INFO
-// ======================
+// ---------- UPDATE MLM PAYOUT ----------
 exports.updateMLMPayout = async (req, res) => {
   try {
     const { userId, pendingCommission, totalWithdrawn, lastPayoutDate, nextPayoutDate } = req.body;
@@ -967,9 +849,7 @@ exports.updateMLMPayout = async (req, res) => {
   }
 };
 
-// ======================
-// UPDATE WALLET
-// ======================
+// ---------- UPDATE WALLET ----------
 exports.updateWallet = async (req, res) => {
   try {
     const { userId, amount, operation } = req.body;
@@ -997,9 +877,7 @@ exports.updateWallet = async (req, res) => {
   }
 };
 
-// ======================
-// ADD HEALTH RECORD
-// ======================
+// ---------- ADD HEALTH RECORD ----------
 exports.addHealthRecord = async (req, res) => {
   try {
     const { recordType, title, description, date } = req.body;
@@ -1010,7 +888,7 @@ exports.addHealthRecord = async (req, res) => {
     let fileUrl = null;
     if (req.file) {
       const ext = path.extname(req.file.originalname);
-      const fileName = `${Date.now()}_health_${Math.random().toString(36).substring(2)}${ext}`;
+      const fileName = `${Date.now()}_health_${crypto.randomBytes(6).toString('hex')}${ext}`;
       const newPath = path.join(uploadDir, fileName);
       await fs.rename(req.file.path, newPath);
       fileUrl = `/uploads/${fileName}`;
@@ -1027,14 +905,12 @@ exports.addHealthRecord = async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'Health record added', healthRecords: user.healthRecords });
   } catch (error) {
-    if (req.file) await fs.unlink(req.file.path).catch(() => { });
+    if (req.file) await fs.unlink(req.file.path).catch(() => {});
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// ======================
-// ADD PRODUCT LISTING
-// ======================
+// ---------- ADD PRODUCT LISTING ----------
 exports.addProductListing = async (req, res) => {
   try {
     const { name, price, quantity, unit, category, description } = req.body;
@@ -1045,7 +921,7 @@ exports.addProductListing = async (req, res) => {
     let imageUrl = null;
     if (req.file) {
       const ext = path.extname(req.file.originalname);
-      const fileName = `${Date.now()}_product_${Math.random().toString(36).substring(2)}${ext}`;
+      const fileName = `${Date.now()}_product_${crypto.randomBytes(6).toString('hex')}${ext}`;
       const newPath = path.join(uploadDir, fileName);
       await fs.rename(req.file.path, newPath);
       imageUrl = `/uploads/${fileName}`;
@@ -1066,14 +942,12 @@ exports.addProductListing = async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'Product added', product: newProduct });
   } catch (error) {
-    if (req.file) await fs.unlink(req.file.path).catch(() => { });
+    if (req.file) await fs.unlink(req.file.path).catch(() => {});
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// ======================
-// ADD CONTRACT FARMING AGREEMENT
-// ======================
+// ---------- ADD CONTRACT FARMING ----------
 exports.addContractFarming = async (req, res) => {
   try {
     const { buyerId, crop, quantity, pricePerUnit, startDate, endDate } = req.body;
@@ -1102,9 +976,7 @@ exports.addContractFarming = async (req, res) => {
   }
 };
 
-// ======================
-// ADD LOAN
-// ======================
+// ---------- ADD LOAN ----------
 exports.addLoan = async (req, res) => {
   try {
     const { amount, emiAmount, tenureMonths } = req.body;
@@ -1129,9 +1001,7 @@ exports.addLoan = async (req, res) => {
   }
 };
 
-// ======================
-// ADD CLIENT (CRM)
-// ======================
+// ---------- ADD CLIENT ----------
 exports.addClient = async (req, res) => {
   try {
     const { name, email, phone, company, gstNumber, address } = req.body;
@@ -1157,9 +1027,7 @@ exports.addClient = async (req, res) => {
   }
 };
 
-// ======================
-// ADD PROJECT (CRM/IT)
-// ======================
+// ---------- ADD PROJECT ----------
 exports.addProject = async (req, res) => {
   try {
     const { name, description, clientId, startDate, endDate, budget } = req.body;
@@ -1186,9 +1054,7 @@ exports.addProject = async (req, res) => {
   }
 };
 
-// ======================
-// ADD STORE PRODUCT (E-commerce)
-// ======================
+// ---------- ADD STORE PRODUCT ----------
 exports.addStoreProduct = async (req, res) => {
   try {
     const { name, price, category, stock, description } = req.body;
@@ -1201,7 +1067,7 @@ exports.addStoreProduct = async (req, res) => {
     let imageUrl = null;
     if (req.file) {
       const ext = path.extname(req.file.originalname);
-      const fileName = `${Date.now()}_store_${Math.random().toString(36).substring(2)}${ext}`;
+      const fileName = `${Date.now()}_store_${crypto.randomBytes(6).toString('hex')}${ext}`;
       const newPath = path.join(uploadDir, fileName);
       await fs.rename(req.file.path, newPath);
       imageUrl = `/uploads/${fileName}`;
@@ -1221,7 +1087,7 @@ exports.addStoreProduct = async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'Store product added', product });
   } catch (error) {
-    if (req.file) await fs.unlink(req.file.path).catch(() => { });
+    if (req.file) await fs.unlink(req.file.path).catch(() => {});
     res.status(500).json({ success: false, error: error.message });
   }
 };
