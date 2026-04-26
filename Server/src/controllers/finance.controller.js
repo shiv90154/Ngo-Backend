@@ -7,6 +7,7 @@ const Transaction = require('../models/Transaction.model');
 const Loan = require('../models/Loan.model');
 const BillPayment = require('../models/BillPayment.model');
 const AepsRequest = require('../models/AepsRequest.model');
+const { calculateCommission } = require('../services/commission.service');   // 🆕 MLM
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -85,6 +86,9 @@ exports.razorpayWebhook = async (req, res) => {
             referenceId: payment.id,
             status: 'completed'
           }], { session });
+
+          // 🆕 MLM Commission for wallet top‑up
+          await calculateCommission(userId, amount, 'wallet_topup', payment.id);
         }
         await session.commitTransaction();
       } catch (err) {
@@ -199,6 +203,10 @@ exports.applyLoan = async (req, res) => {
       amount,
       description: `Loan sanctioned - ${loan._id}`
     });
+
+    // Optional MLM commission for loan (if you want to treat loan as revenue)
+    // await calculateCommission(req.user.id, amount, 'loan', loan._id);
+
     res.status(201).json({ success: true, data: loan });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -473,6 +481,6 @@ exports.getDashboard = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
