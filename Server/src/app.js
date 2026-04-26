@@ -1,4 +1,3 @@
-// src/app.js
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -13,43 +12,30 @@ app.use(cors({
   credentials: true,
 }));
 
-// 🆕 IMPORTANT: Razorpay webhook needs the raw request body for signature verification.
 app.use('/api/finance/webhooks/razorpay', express.raw({ type: 'application/json' }));
 
-// General body parsers for all other routes
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-/**
- * FIX: Pointing to the correct uploads directory.
- * Since app.js is in /src, and your uploads folder is also in /src,
- * we use path.join(__dirname, 'uploads').
- */
 const uploadsDir = path.join(__dirname, 'uploads');
 
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Serving static files
 app.use('/uploads', express.static(uploadsDir));
 
-// Health check endpoint
 app.get('/', (req, res) => {
-  res.status(200).json({ 
+  res.status(200).json({
     success: true,
-    message: 'Samraddh Bharat API Running 🚀', 
-    timestamp: new Date().toISOString() 
+    message: 'API Running',
+    timestamp: new Date().toISOString()
   });
 });
 
-// API routes (mount all routes under /api)
 app.use('/api', routes);
 
-// 404 handler – must be after all route definitions
 app.use(notFound);
-
-// Global error handler – catches any unhandled errors
 app.use(errorHandler);
 
 module.exports = app;

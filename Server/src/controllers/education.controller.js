@@ -8,6 +8,7 @@ const Enrollment = require('../models/Enrollment');
 const Certificate = require('../models/Certificate');
 const User = require('../models/user.model');
 const crypto = require('crypto');
+const { calculateCommission } = require('../services/commission.service');   // 🆕 MLM
 
 // ====================== 课程 CRUD（教师/管理员） ======================
 exports.createCourse = async (req, res) => {
@@ -170,17 +171,25 @@ exports.enrollCourse = async (req, res) => {
   try {
     const course = await Course.findById(req.params.id);
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
-    // 付费课程需验证支付（此处简化）
-    if (course.price > 0) {
-      // 假设前端已处理支付
+
+    // 检查是否已注册
+    const existing = await Enrollment.findOne({ student: req.user.id, course: course._id });
+    if (existing) {
+      return res.json({ success: true, enrollment: existing, message: 'Already enrolled' });
     }
-    const enrollment = await Enrollment.findOneAndUpdate(
-      { student: req.user.id, course: course._id },
-      {},
-      { upsert: true, new: true }
-    );
+
+    const enrollment = await Enrollment.create({
+      student: req.user.id,
+      course: course._id
+    });
     await Course.findByIdAndUpdate(course._id, { $inc: { totalEnrolled: 1 } });
-    res.json({ success: true, enrollment });
+
+    // 🆕 MLM Commission (only if course is paid)
+    if (course.price > 0) {
+      await calculateCommission(req.user.id, course.price, 'course_enroll', enrollment._id);
+    }
+
+    res.status(201).json({ success: true, enrollment });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -213,6 +222,7 @@ exports.getMyCertificates = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+
 // ====================== 学习进度 ======================
 exports.markLessonComplete = async (req, res) => {
   try {

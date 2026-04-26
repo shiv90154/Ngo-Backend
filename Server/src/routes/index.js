@@ -12,6 +12,8 @@ const liveClassRoutes = require('./liveClass.routes');
 const itRoutes = require('./it.routes');
 const agricultureRoutes = require('./agriculture.routes');
 const financeRoutes = require('./finance.routes');
+const mlmRoutes = require('./mlm.routes');
+const subscriptionRoutes = require('./subscription.routes');   // 🆕 Subscription routes
 
 // Health check
 router.get('/health', (req, res) => {
@@ -29,5 +31,7 @@ router.use('/liveclass', liveClassRoutes);
 router.use('/it', itRoutes);
 router.use('/agriculture', agricultureRoutes);
 router.use('/finance', financeRoutes);
+router.use('/mlm', mlmRoutes);
+router.use('/subscription', subscriptionRoutes);          // 🆕 Mount subscription routes
 
 module.exports = router;
