@@ -1,4 +1,3 @@
-// models/AgricultureAddress.js
 const mongoose = require("mongoose");
 
 const customerAddressSchema = new mongoose.Schema(
@@ -7,22 +6,9 @@ const customerAddressSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: "User",
             required: true,
-            index: true,
         },
 
-        fullName: {
-            type: String,
-            required: true,
-            trim: true,
-        },
-
-        phone: {
-            type: String,
-            required: true,
-            trim: true,
-        },
-
-        addressLine: {
+        street: {
             type: String,
             required: true,
             trim: true,
@@ -40,14 +26,21 @@ const customerAddressSchema = new mongoose.Schema(
             trim: true,
         },
 
-        pincode: {
+        zipCode: {
             type: String,
             required: true,
             trim: true,
         },
 
-        landmark: {
+        country: {
             type: String,
+            default: "India",
+            trim: true,
+        },
+
+        phoneNumber: {
+            type: String,
+            required: true,
             trim: true,
         },
 

@@ -38,6 +38,7 @@ const {
     getDashboard,
     getProfile,
     getUserAddresses,
+    createUserAddress,
     // Seller module
     getSellerDashboard,
     getSellerProducts,
@@ -75,6 +76,7 @@ router.get('/my-orders', getMyOrders);
 
 //Address
 router.get('/addresses', getUserAddresses);
+router.post('/addresses', createUserAddress);
 // Cart
 router.route('/cart')
     .get(getCart)

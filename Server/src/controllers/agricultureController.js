@@ -752,30 +752,53 @@ const removeCartItem = async (req, res, next) => {
         next(error);
     }
 };
-
 const checkout = async (req, res, next) => {
     try {
         const { deliveryAddress } = req.body;
-        if (!deliveryAddress || !deliveryAddress.city || !deliveryAddress.block) {
+
+        // Validate delivery address based on CustomerAddress model
+        if (!deliveryAddress) {
             return res.status(400).json({
                 success: false,
-                message: 'Complete delivery address (city & block) is required'
+                message: 'Delivery address is required'
             });
         }
-        const cart = await Cart.findOne({ user: req.user.id }).populate('items.product');
-        if (!cart || cart.items.length === 0) {
-            return res.status(400).json({ success: false, message: 'Cart is empty' });
+
+        // Check if deliveryAddress has the required fields from CustomerAddress model
+        const requiredAddressFields = ['street', 'city', 'state', 'zipCode', 'phoneNumber'];
+        const missingFields = requiredAddressFields.filter(field => !deliveryAddress[field]);
+
+        if (missingFields.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Missing required address fields: ${missingFields.join(', ')}`
+            });
         }
 
+        // Get user's cart with populated products
+        const cart = await Cart.findOne({ user: req.user.id }).populate('items.product');
+
+        if (!cart || cart.items.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cart is empty'
+            });
+        }
+
+        // Check stock availability for all items
         for (const item of cart.items) {
             const product = item.product;
             if (!product) {
-                return res.status(400).json({ success: false, message: 'Product not found in cart' });
+                return res.status(400).json({
+                    success: false,
+                    message: 'Product not found in cart'
+                });
             }
+
             if (product.quantity < item.quantity) {
                 return res.status(400).json({
                     success: false,
-                    message: `Insufficient stock for ${product.name}. Only ${product.quantity} left.`
+                    message: `Insufficient stock for ${product.name}. Only ${product.quantity} ${product.unit || 'items'} left.`
                 });
             }
         }
@@ -784,38 +807,74 @@ const checkout = async (req, res, next) => {
         session.startTransaction();
 
         try {
+            // Create orders for each cart item
+            const orders = [];
             for (const item of cart.items) {
-                await Order.create([{
+                const product = item.product;
+                const orderData = {
                     buyer: req.user.id,
-                    seller: item.product.seller,
-                    product: item.product._id,
+                    seller: product.seller,
+                    product: product._id,
                     quantity: item.quantity,
                     totalPrice: item.price * item.quantity,
-                    deliveryAddress,
+                    deliveryAddress: {
+                        street: deliveryAddress.street,
+                        city: deliveryAddress.city,
+                        state: deliveryAddress.state,
+                        zipCode: deliveryAddress.zipCode,
+                        country: deliveryAddress.country || 'India',
+                        phoneNumber: deliveryAddress.phoneNumber
+                    },
                     orderStatus: 'pending',
-                    paymentStatus: 'pending'
-                }], { session });
+                    paymentStatus: 'pending',
+                    paymentMethod: 'cod', // Cash on delivery since no payment integration
+                    createdAt: new Date(),
+                    updatedAt: new Date()
+                };
+
+                const order = await Order.create([orderData], { session });
+                orders.push(order[0]);
             }
+
+            // Update product quantities
             for (const item of cart.items) {
-                await Product.updateOne(
-                    { _id: item.product._id, quantity: { $gte: item.quantity } },
+                const product = item.product;
+                const updateResult = await Product.updateOne(
+                    { _id: product._id, quantity: { $gte: item.quantity } },
                     { $inc: { quantity: -item.quantity } },
                     { session }
                 );
+
+                if (updateResult.modifiedCount === 0) {
+                    throw new Error(`Failed to update stock for ${product.name}`);
+                }
             }
 
+            // Clear the cart
             cart.items = [];
             await cart.save({ session });
 
             await session.commitTransaction();
-            res.status(200).json({ success: true });
+
+            res.status(200).json({
+                success: true,
+                message: 'Order placed successfully',
+                data: {
+                    orders: orders,
+                    orderCount: orders.length,
+                    totalAmount: orders.reduce((sum, order) => sum + order.totalPrice, 0)
+                }
+            });
+
         } catch (error) {
             await session.abortTransaction();
             throw error;
         } finally {
             session.endSession();
         }
+
     } catch (error) {
+        console.error('Checkout error:', error);
         next(error);
     }
 };
@@ -1048,6 +1107,59 @@ const getUserAddresses = async (req, res, next) => {
         next(error);
     }
 };
+const createUserAddress = async (req, res, next) => {
+    try {
+        const {
+            street,
+            city,
+            state,
+            zipCode,
+            country,
+            phoneNumber,
+            isDefault
+        } = req.body;
+
+        // ✅ validation
+        if (!street || !city || !state || !zipCode || !phoneNumber) {
+            return res.status(400).json({
+                success: false,
+                message: "street, city, state, zipCode and phoneNumber are required"
+            });
+        }
+
+        // ✅ remove default from others
+        if (isDefault) {
+            await CustomerAddress.updateMany(
+                { user: req.user.id },
+                { isDefault: false }
+            );
+        }
+
+        // ✅ create address
+        const newAddress = await CustomerAddress.create({
+            user: req.user.id,
+            street,
+            city,
+            state,
+            zipCode,
+            country: country || "India",
+            phoneNumber,
+            isDefault: Boolean(isDefault)
+        });
+
+        return res.status(201).json({
+            success: true,
+            data: newAddress
+        });
+
+    } catch (error) {
+        console.error("Error creating address:", error);
+        res.status(500).json({
+            success: false,
+            message: error.message || "Failed to create address"
+        });
+    }
+};
 // --------------MANDI API -------------------
 const getMandiPrices = async (req, res) => {
     try {
@@ -1180,6 +1292,7 @@ module.exports = {
     // Test
     testAddProduct,
     getUserAddresses,
+    createUserAddress,
     getMandiPrices,
     // Seller orders
     getSellerOrders
