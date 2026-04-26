@@ -8,7 +8,8 @@ const Enrollment = require('../models/Enrollment');
 const Certificate = require('../models/Certificate');
 const User = require('../models/user.model');
 const crypto = require('crypto');
-const { calculateCommission } = require('../services/commission.service');   // 🆕 MLM
+const { calculateCommission } = require('../services/commission.service');
+const mailer = require('../utils/sendEmail');   // 🆕 email service
 
 // ====================== 课程 CRUD（教师/管理员） ======================
 exports.createCourse = async (req, res) => {
@@ -56,7 +57,6 @@ exports.deleteCourse = async (req, res) => {
   try {
     const course = await Course.findOneAndDelete({ _id: req.params.id, instructor: req.user.id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
-    // 级联删除章节、课时等（可选）
     res.json({ success: true, message: 'Course deleted' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -172,7 +172,6 @@ exports.enrollCourse = async (req, res) => {
     const course = await Course.findById(req.params.id);
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
 
-    // 检查是否已注册
     const existing = await Enrollment.findOne({ student: req.user.id, course: course._id });
     if (existing) {
       return res.json({ success: true, enrollment: existing, message: 'Already enrolled' });
@@ -184,9 +183,17 @@ exports.enrollCourse = async (req, res) => {
     });
     await Course.findByIdAndUpdate(course._id, { $inc: { totalEnrolled: 1 } });
 
-    // 🆕 MLM Commission (only if course is paid)
+    // MLM Commission (only if course is paid)
     if (course.price > 0) {
       await calculateCommission(req.user.id, course.price, 'course_enroll', enrollment._id);
+    }
+
+    // 🆕 Send enrollment confirmation email
+    try {
+      const student = await User.findById(req.user.id);
+      await mailer.sendCourseEnrollment(student.email, student.fullName, course.title);
+    } catch (emailErr) {
+      console.error('Course enrollment email failed:', emailErr.message);
     }
 
     res.status(201).json({ success: true, enrollment });
@@ -332,7 +339,7 @@ exports.getInstructorDashboard = async (req, res) => {
       success: true,
       totalCourses: courses.length,
       totalStudents,
-      totalRevenue: 0, // 可从支付记录统计
+      totalRevenue: 0,
       recentEnrollments
     });
   } catch (error) {

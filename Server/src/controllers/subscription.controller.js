@@ -4,6 +4,7 @@ const User = require('../models/user.model');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const { calculateCommission } = require('../services/commission.service');   // MLM
+const mailer = require('../utils/sendEmail');                                // 🆕 email service
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -108,6 +109,18 @@ exports.verifyPayment = async (req, res) => {
 
     // MLM commission for subscription purchase
     await calculateCommission(req.user.id, plan.price, 'subscription', payment._id);
+
+    // 🆕 Send subscription activation email
+    try {
+      await mailer.sendSubscriptionActivated(
+        user.email,
+        user.fullName,
+        plan.name,
+        expiryDate
+      );
+    } catch (emailErr) {
+      console.error('Subscription activation email failed:', emailErr.message);
+    }
 
     res.json({ success: true, message: 'Subscription activated', expiresAt: expiryDate });
   } catch (error) {

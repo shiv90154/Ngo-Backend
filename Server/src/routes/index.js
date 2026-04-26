@@ -15,6 +15,9 @@ const financeRoutes = require('./finance.routes');
 const mlmRoutes = require('./mlm.routes');
 const subscriptionRoutes = require('./subscription.routes');   // 🆕 Subscription routes
 
+
+const searchController = require('../controllers/search.controller');
+
 // Health check
 router.get('/health', (req, res) => {
   res.json({ success: true, message: 'API is running' });
@@ -33,5 +36,5 @@ router.use('/agriculture', agricultureRoutes);
 router.use('/finance', financeRoutes);
 router.use('/mlm', mlmRoutes);
 router.use('/subscription', subscriptionRoutes);          // 🆕 Mount subscription routes
-
+router.get('/search', require('../controllers/search.controller').globalSearch);
 module.exports = router;
