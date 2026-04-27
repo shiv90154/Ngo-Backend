@@ -210,36 +210,128 @@ const getContractorProducts = async (req, res, next) => {
 
 // @desc    Place an order
 // @route   POST /agriculture/orders
+// In your agricultureController.js
+
 const createOrder = async (req, res, next) => {
     try {
-        if (!isAgricultureUser(req.user)) {
-            return res.status(403).json({ success: false, message: 'Only agriculture users can place orders' });
+        const {
+            items,           // Array of items from cart
+            deliveryAddress,
+            paymentMethod,
+            notes
+        } = req.body;
+
+        if (!items || items.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'No items in order'
+            });
         }
 
-        const { productId, quantity, deliveryAddress } = req.body;
-        const product = await Product.findById(productId);
+        // Group items by seller
+        const sellerGroups = new Map();
 
-        if (!product || !product.isAvailable) {
-            return res.status(400).json({ success: false, message: 'Product not available' });
+        for (const item of items) {
+            const product = await Product.findById(item.productId);
+            if (!product) {
+                return res.status(404).json({
+                    success: false,
+                    message: `Product ${item.productId} not found`
+                });
+            }
+
+            const sellerId = product.seller.toString();
+
+            if (!sellerGroups.has(sellerId)) {
+                sellerGroups.set(sellerId, {
+                    sellerId: sellerId,
+                    items: [],
+                    subtotal: 0,
+                    seller: product.seller
+                });
+            }
+
+            const group = sellerGroups.get(sellerId);
+            const itemTotal = item.price * item.quantity;
+
+            group.items.push({
+                productId: product._id,
+                productName: product.name,
+                quantity: item.quantity,
+                price: item.price,
+                image: product.images?.[0] || product.imageUrl,
+                unit: product.unit
+            });
+            group.subtotal += itemTotal;
         }
 
-        if (Product.schema.path('approvalStatus') && product.approvalStatus !== 'approved') {
-            return res.status(400).json({ success: false, message: 'Product not approved for sale' });
+        // Create separate order for each seller (as they might have different shipping)
+        const createdOrders = [];
+
+        for (const [sellerId, group] of sellerGroups) {
+            // Calculate shipping (you can implement your logic)
+            const shippingCost = calculateShippingCost(group.items, deliveryAddress);
+            const tax = calculateTax(group.subtotal);
+            const total = group.subtotal + shippingCost + tax;
+
+            const order = await Order.create({
+                orderId: generateOrderId(),
+                buyer: req.user.id,
+                seller: sellerId,
+                items: group.items,
+                deliveryAddress: deliveryAddress,
+                paymentMethod: paymentMethod,
+                paymentStatus: 'pending',
+                subtotal: group.subtotal,
+                shippingCost: shippingCost,
+                tax: tax,
+                total: total,
+                orderStatus: 'pending',
+                notes: notes,
+                createdAt: new Date()
+            });
+
+            // Populate product details for response
+            await order.populate('items.productId');
+
+            createdOrders.push(order);
+
+            // Clear items from cart for this seller
+            await Cart.findOneAndUpdate(
+                { user: req.user.id },
+                { $pull: { items: { productId: { $in: group.items.map(i => i.productId) } } } }
+            );
         }
 
-        const order = await Order.create({
-            buyer: req.user.id,
-            seller: product.seller,
-            product: productId,
-            quantity,
-            totalPrice: product.price * quantity,
-            deliveryAddress
+        res.status(201).json({
+            success: true,
+            message: createdOrders.length === 1
+                ? 'Order created successfully'
+                : `${createdOrders.length} orders created successfully`,
+            data: createdOrders
         });
 
-        res.status(201).json({ success: true, data: order });
     } catch (error) {
+        console.error('Create order error:', error);
         next(error);
     }
+};
+
+// Helper functions
+const generateOrderId = () => {
+    return 'ORD' + Date.now().toString().slice(-8) + Math.random().toString(36).substring(2, 6).toUpperCase();
+};
+
+const calculateShippingCost = (items, address) => {
+    // Implement your shipping logic
+    // Example: Free shipping over ₹500, else ₹40
+    const subtotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    return subtotal > 500 ? 0 : 40;
+};
+
+const calculateTax = (subtotal) => {
+    // Example: 5% GST for agricultural products
+    return subtotal * 0.05;
 };
 
 // @desc    Get buyer order history
@@ -281,301 +373,6 @@ const getMyOrders = async (req, res, next) => {
         next(error);
     }
 };
-// ------------------- SELLER MODULE -------------------
-
-// @desc    Get seller dashboard
-// @route   GET /agriculture/seller/dashboard
-const getSellerDashboard = async (req, res, next) => {
-    try {
-        if (!ensureSellerAccess(req, res)) return;
-
-        const sellerId = req.user.id;
-
-        const pendingFilter = Product.schema.path('approvalStatus')
-            ? { seller: sellerId, approvalStatus: 'pending' }
-            : { seller: sellerId, isAvailable: false };
-
-        const [
-            totalProducts,
-            activeProducts,
-            pendingProducts,
-            lowStockProducts,
-            totalOrders,
-            recentProducts,
-            recentOrders,
-            revenueAgg
-        ] = await Promise.all([
-            Product.countDocuments({ seller: sellerId }),
-            Product.countDocuments({ seller: sellerId, isAvailable: true }),
-            Product.countDocuments(pendingFilter),
-            Product.countDocuments({ seller: sellerId, quantity: { $lte: 5 } }),
-            Order.countDocuments({ seller: sellerId }),
-            Product.find({ seller: sellerId }).sort({ createdAt: -1 }).limit(5),
-            Order.find({ seller: sellerId })
-                .populate('buyer', 'fullName')
-                .sort({ createdAt: -1 })
-                .limit(5),
-            Order.aggregate([
-                {
-                    $match: {
-                        seller: new mongoose.Types.ObjectId(String(sellerId))
-                    }
-                },
-                {
-                    $group: {
-                        _id: null,
-                        total: { $sum: '$totalPrice' }
-                    }
-                }
-            ])
-        ]);
-
-        const monthlyRevenue = revenueAgg[0]?.total || 0;
-
-        res.status(200).json({
-            success: true,
-            data: {
-                stats: {
-                    totalProducts,
-                    activeProducts,
-                    pendingProducts,
-                    lowStockProducts,
-                    totalOrders,
-                    monthlyRevenue
-                },
-                recentProducts: recentProducts.map(product => ({
-                    id: product._id,
-                    name: product.name,
-                    category: product.category,
-                    price: product.price,
-                    unit: product.unit,
-                    quantity: product.quantity,
-                    imageUrl: product.imageUrl || product.images?.[0] || '',
-                    approvalStatus: product.approvalStatus || 'approved',
-                    status: product.isAvailable ? 'active' : 'inactive'
-                })),
-                recentOrders: recentOrders.map(order => ({
-                    id: order._id,
-                    buyerName: formatUserDisplayName(order.buyer, 'Buyer'),
-                    total: order.totalPrice,
-                    status: order.status || 'processing',
-                    createdAt: order.createdAt
-                }))
-            }
-        });
-    } catch (error) {
-        next(error);
-    }
-};
-
-// @desc    Get seller products
-// @route   GET /agriculture/seller/products
-const getSellerProducts = async (req, res, next) => {
-    try {
-        if (!ensureSellerAccess(req, res)) return;
-
-        const { page = 1, limit = 10 } = req.query;
-        const pageNum = Number(page);
-        const limitNum = Number(limit);
-        const skip = (pageNum - 1) * limitNum;
-
-        const filter = { seller: req.user.id };
-
-        const products = await Product.find(filter)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limitNum);
-
-        const totalItems = await Product.countDocuments(filter);
-
-        const items = products.map(product => ({
-            id: product._id,
-            name: product.name,
-            category: product.category,
-            price: product.price,
-            quantity: product.quantity,
-            unit: product.unit,
-            location: product.location || '',
-            imageUrl: product.imageUrl || product.images?.[0] || '',
-            isOrganic: !!product.isOrganic,
-            approvalStatus: product.approvalStatus || 'approved',
-            status: product.isAvailable ? 'active' : 'inactive',
-            createdAt: product.createdAt,
-            updatedAt: product.updatedAt
-        }));
-
-        res.status(200).json({
-            success: true,
-            data: {
-                items,
-                pagination: {
-                    page: pageNum,
-                    limit: limitNum,
-                    totalItems,
-                    totalPages: Math.ceil(totalItems / limitNum)
-                }
-            }
-        });
-    } catch (error) {
-        next(error);
-    }
-};
-
-// @desc    Get seller product by ID
-// @route   GET /agriculture/seller/products/:id
-const getSellerProductById = async (req, res, next) => {
-    try {
-        if (!ensureSellerAccess(req, res)) return;
-
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-            return res.status(400).json({ success: false, message: 'Invalid product ID' });
-        }
-
-        const product = await Product.findOne({
-            _id: req.params.id,
-            seller: req.user.id
-        });
-
-        if (!product) {
-            return res.status(404).json({ success: false, message: 'Product not found' });
-        }
-
-        res.status(200).json({
-            success: true,
-            data: {
-                id: product._id,
-                name: product.name,
-                description: product.description || '',
-                category: product.category,
-                price: product.price,
-                quantity: product.quantity,
-                unit: product.unit,
-                location: product.location || '',
-                imageUrl: product.imageUrl || product.images?.[0] || '',
-                images: product.images || (product.imageUrl ? [product.imageUrl] : []),
-                isOrganic: !!product.isOrganic,
-                approvalStatus: product.approvalStatus || 'approved',
-                status: product.isAvailable ? 'active' : 'inactive',
-                createdAt: product.createdAt,
-                updatedAt: product.updatedAt
-            }
-        });
-    } catch (error) {
-        next(error);
-    }
-};
-
-// @desc    Create seller product
-// @route   POST /agriculture/seller/products
-const createSellerProduct = async (req, res, next) => {
-    try {
-        if (!ensureSellerAccess(req, res)) return;
-
-        const payload = {
-            ...req.body,
-            seller: req.user.id,
-            isAvailable: true
-        };
-
-        if (Product.schema.path('approvalStatus')) {
-            payload.approvalStatus = 'pending';
-        }
-
-        const product = await Product.create(payload);
-
-        res.status(201).json({
-            success: true,
-            message: 'Product created successfully',
-            data: {
-                id: product._id,
-                name: product.name,
-                category: product.category,
-                price: product.price,
-                quantity: product.quantity,
-                unit: product.unit,
-                location: product.location || '',
-                imageUrl: product.imageUrl || product.images?.[0] || '',
-                isOrganic: !!product.isOrganic,
-                approvalStatus: product.approvalStatus || 'approved',
-                status: product.isAvailable ? 'active' : 'inactive',
-                createdAt: product.createdAt
-            }
-        });
-    } catch (error) {
-        next(error);
-    }
-};
-
-// @desc    Update seller product
-// @route   PUT /agriculture/seller/products/:id
-const updateSellerProduct = async (req, res, next) => {
-    try {
-        if (!ensureSellerAccess(req, res)) return;
-
-        const product = await Product.findOne({
-            _id: req.params.id,
-            seller: req.user.id
-        });
-
-        if (!product) {
-            return res.status(404).json({ success: false, message: 'Product not found' });
-        }
-
-        Object.assign(product, req.body);
-
-        if (Product.schema.path('approvalStatus')) {
-            product.approvalStatus = 'pending';
-        }
-
-        await product.save();
-
-        res.status(200).json({
-            success: true,
-            message: 'Product updated successfully',
-            data: {
-                id: product._id,
-                name: product.name,
-                category: product.category,
-                price: product.price,
-                quantity: product.quantity,
-                unit: product.unit,
-                location: product.location || '',
-                imageUrl: product.imageUrl || product.images?.[0] || '',
-                isOrganic: !!product.isOrganic,
-                approvalStatus: product.approvalStatus || 'approved',
-                status: product.isAvailable ? 'active' : 'inactive',
-                updatedAt: product.updatedAt
-            }
-        });
-    } catch (error) {
-        next(error);
-    }
-};
-
-// @desc    Delete seller product
-// @route   DELETE /agriculture/seller/products/:id
-const deleteSellerProduct = async (req, res, next) => {
-    try {
-        if (!ensureSellerAccess(req, res)) return;
-
-        const product = await Product.findOneAndDelete({
-            _id: req.params.id,
-            seller: req.user.id
-        });
-
-        if (!product) {
-            return res.status(404).json({ success: false, message: 'Product not found' });
-        }
-
-        res.status(200).json({
-            success: true,
-            message: 'Product deleted successfully'
-        });
-    } catch (error) {
-        next(error);
-    }
-};
-
 // ------------------- LEGACY PRODUCT HANDLERS -------------------
 
 // @desc    Create a new product listing
@@ -1258,14 +1055,6 @@ module.exports = {
     createOrder,
     getMyOrders,
 
-    // Seller module
-    getSellerDashboard,
-    getSellerProducts,
-    getSellerProductById,
-    createSellerProduct,
-    updateSellerProduct,
-    deleteSellerProduct,
-
     // Legacy posting
     createProduct,
     updateProduct,
@@ -1294,6 +1083,4 @@ module.exports = {
     getUserAddresses,
     createUserAddress,
     getMandiPrices,
-    // Seller orders
-    getSellerOrders
 };

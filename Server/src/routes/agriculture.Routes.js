@@ -3,15 +3,6 @@ const axios = require('axios');
 const router = express.Router();
 
 const {
-    getAllRecords,
-    getRecordById,
-    createRecord,
-    updateRecord,
-    deleteRecord,
-    getYieldSummary,
-    getUpcomingTasks,
-    recordSensorData,
-
     // Marketplace
     getAllProducts,
     getProductById,
@@ -39,19 +30,27 @@ const {
     getProfile,
     getUserAddresses,
     createUserAddress,
-    // Seller module
+    // Test
+    testAddProduct,
+    getMandiPrices
+} = require('../controllers/agricultureController');
+
+const {
+    // Seller Dashboard & Orders
     getSellerDashboard,
+    getSellerOrders,
+    getSellerOrderStats,
+    updateOrderStatus,
+    downloadInvoice,
+    contactBuyer,
+
+    // Seller Products
     getSellerProducts,
     getSellerProductById,
     createSellerProduct,
     updateSellerProduct,
-    deleteSellerProduct,
-
-    // Test
-    testAddProduct,
-    getSellerOrders,
-    getMandiPrices
-} = require('../controllers/agricultureController');
+    deleteSellerProduct
+} = require('../controllers/agriSeller.controller');
 
 const { protect } = require('../middleware/auth.middleware');
 
@@ -91,6 +90,14 @@ router.post('/checkout', checkout);
 // ---------------- SELLER MODULE ----------------
 router.get('/seller/dashboard', getSellerDashboard);
 
+// ---------------- SELLER ORDERS ----------------
+router.get('/seller/orders', getSellerOrders);
+router.get('/seller/orders/stats', getSellerOrderStats);
+router.put('/seller/orders/:orderId/status', updateOrderStatus);
+router.get('/seller/orders/:orderId/invoice', downloadInvoice);
+router.post('/seller/orders/:orderId/contact-buyer', contactBuyer);
+
+// ---------------- SELLER PRODUCTS ----------------
 router.route('/seller/products')
     .get(getSellerProducts)
     .post(createSellerProduct);
@@ -99,9 +106,6 @@ router.route('/seller/products/:id')
     .get(getSellerProductById)
     .put(updateSellerProduct)
     .delete(deleteSellerProduct);
-
-router.route("/seller/orders")
-    .get(getSellerOrders);
 
 // ---------------- LEGACY DEALER ROUTES ----------------
 router.route('/my-products')
