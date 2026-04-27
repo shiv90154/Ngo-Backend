@@ -5,6 +5,7 @@ const DoctorAvailability = require('../models/DoctorAvailability');
 const User = require('../models/user.model');
 const path = require('path');
 const fs = require('fs').promises;
+const mailer = require('../utils/sendEmail');   // 🆕 email service
 
 const uploadDir = path.join(__dirname, '../uploads/healthcare');
 (async () => {
@@ -211,6 +212,19 @@ exports.bookAppointment = async (req, res) => {
     await appointment.populate('patientId', 'fullName email phone');
     await appointment.populate('doctorId', 'fullName email doctorProfile');
 
+    // 🆕 Send appointment confirmation email
+    try {
+      await mailer.sendAppointmentConfirmation(
+        appointment.patientId.email,
+        appointment.patientId.fullName,
+        doctor.fullName,
+        appointmentDate,
+        timeSlot.start
+      );
+    } catch (emailErr) {
+      console.error('Appointment confirmation email failed:', emailErr.message);
+    }
+
     res.status(201).json({
       success: true,
       message: 'Appointment booked successfully',
@@ -403,6 +417,17 @@ exports.createPrescription = async (req, res) => {
 
     await prescription.populate('patientId', 'fullName email');
     await prescription.populate('doctorId', 'fullName doctorProfile');
+
+    // 🆕 Send prescription notification email
+    try {
+      await mailer.sendPrescriptionNotification(
+        prescription.patientId.email,
+        prescription.patientId.fullName,
+        doctor.fullName
+      );
+    } catch (emailErr) {
+      console.error('Prescription notification email failed:', emailErr.message);
+    }
 
     res.status(201).json({
       success: true,

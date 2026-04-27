@@ -7,7 +7,8 @@ const Transaction = require('../models/Transaction.model');
 const Loan = require('../models/Loan.model');
 const BillPayment = require('../models/BillPayment.model');
 const AepsRequest = require('../models/AepsRequest.model');
-const { calculateCommission } = require('../services/commission.service');   // 🆕 MLM
+const { calculateCommission } = require('../services/commission.service');   // MLM
+const mailer = require('../utils/sendEmail'); // 🆕 email service
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -18,7 +19,6 @@ const razorpay = new Razorpay({
 // WALLET (RAZORPAY)
 // ======================
 
-// Create order for wallet top‑up
 exports.createWalletOrder = async (req, res) => {
   try {
     const { amount } = req.body;
@@ -37,7 +37,6 @@ exports.createWalletOrder = async (req, res) => {
   }
 };
 
-// Verify Razorpay payment signature (client‑side verification)
 exports.verifyPayment = async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
@@ -48,18 +47,16 @@ exports.verifyPayment = async (req, res) => {
     if (generatedSignature !== razorpay_signature) {
       return res.status(400).json({ success: false, message: 'Invalid signature' });
     }
-    // The actual crediting is handled by webhook; here we just confirm validity.
     res.json({ success: true, message: 'Payment verified successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// Razorpay webhook – IMPORTANT: must receive raw body (see server.js setup)
 exports.razorpayWebhook = async (req, res) => {
   const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
   const signature = req.headers['x-razorpay-signature'];
-  const body = req.body.toString(); // because we use express.raw()
+  const body = req.body.toString();
   const expectedSignature = crypto.createHmac('sha256', secret).update(body).digest('hex');
   if (signature !== expectedSignature) {
     return res.status(400).send('Invalid signature');
@@ -87,7 +84,7 @@ exports.razorpayWebhook = async (req, res) => {
             status: 'completed'
           }], { session });
 
-          // 🆕 MLM Commission for wallet top‑up
+          // MLM Commission for wallet top‑up
           await calculateCommission(userId, amount, 'wallet_topup', payment.id);
         }
         await session.commitTransaction();
@@ -102,7 +99,6 @@ exports.razorpayWebhook = async (req, res) => {
   res.json({ received: true });
 };
 
-// Manual add funds (admin only – restrict in routes)
 exports.addFunds = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -129,7 +125,6 @@ exports.addFunds = async (req, res) => {
   }
 };
 
-// Transfer funds to another user
 exports.transferFunds = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -171,7 +166,6 @@ exports.transferFunds = async (req, res) => {
 // ======================
 // LOANS
 // ======================
-
 exports.applyLoan = async (req, res) => {
   try {
     const { amount, tenureMonths } = req.body;
@@ -204,8 +198,12 @@ exports.applyLoan = async (req, res) => {
       description: `Loan sanctioned - ${loan._id}`
     });
 
-    // Optional MLM commission for loan (if you want to treat loan as revenue)
-    // await calculateCommission(req.user.id, amount, 'loan', loan._id);
+    // 🆕 Send loan sanctioned email
+    try {
+      await mailer.sendLoanSanctioned(user.email, user.fullName, amount);
+    } catch (emailErr) {
+      console.error('Loan sanctioned email failed:', emailErr.message);
+    }
 
     res.status(201).json({ success: true, data: loan });
   } catch (error) {
@@ -264,7 +262,6 @@ exports.repayEmi = async (req, res) => {
 // ======================
 // BILL PAYMENT (BBPS)
 // ======================
-
 exports.payBill = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -278,7 +275,6 @@ exports.payBill = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Insufficient balance' });
     }
 
-    // REAL BBPS API CALL (replace with actual endpoint)
     const bbpsResponse = await axios.post(process.env.BBPS_API_URL, {
       billerId: billType,
       customerId: billNumber,
@@ -333,7 +329,6 @@ exports.getBillHistory = async (req, res) => {
 // ======================
 // AEPS WITHDRAWAL
 // ======================
-
 exports.aepsWithdraw = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -347,7 +342,6 @@ exports.aepsWithdraw = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Insufficient balance' });
     }
 
-    // REAL AEPS API CALL
     const aepsResponse = await axios.post(process.env.AEPS_API_URL, {
       aadhaarNumber,
       amount,
@@ -389,7 +383,6 @@ exports.aepsWithdraw = async (req, res) => {
 // ======================
 // BANK ACCOUNT
 // ======================
-
 exports.verifyBankAccount = async (req, res) => {
   try {
     const { accountNumber, ifsc, accountHolderName, bankName } = req.body;
@@ -442,7 +435,6 @@ exports.getBankAccount = async (req, res) => {
 // ======================
 // WALLET & DASHBOARD
 // ======================
-
 exports.getWallet = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('walletBalance totalEarnings');

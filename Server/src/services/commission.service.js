@@ -1,5 +1,6 @@
 const User = require('../models/user.model');
 const CommissionTransaction = require('../models/CommissionTransaction');
+const mailer = require('../utils/sendEmail');   // 🆕 email service
 
 async function calculateCommission(userId, amount, type, referenceId = null) {
   try {
@@ -28,6 +29,18 @@ async function calculateCommission(userId, amount, type, referenceId = null) {
           totalCommissionEarned: commissionAmount,
         },
       });
+
+      // 🆕 Send commission email notification
+      try {
+        await mailer.sendCommissionCredited(
+          sponsor.email,
+          sponsor.fullName,
+          commissionAmount,
+          type.replace('_', ' ')
+        );
+      } catch (emailErr) {
+        console.error('Commission email failed:', emailErr.message);
+      }
 
       current = await User.findById(sponsor._id).populate('sponsorId');
       level++;

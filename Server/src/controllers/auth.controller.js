@@ -284,7 +284,6 @@ exports.register = async (req, res) => {
       email: user.email,
     });
   } catch (error) {
-    console.error('Register error:', error);
     if (req.files) {
       for (const field in req.files) {
         for (const file of req.files[field]) {
@@ -320,6 +319,13 @@ exports.verifyOTP = async (req, res) => {
     user.otp = null;
     user.otpExpire = null;
     await user.save();
+
+    // 🆕 Send welcome email
+    try {
+      await sendEmail.sendWelcome(user.email, user.fullName);
+    } catch (emailErr) {
+      console.error('Welcome email failed:', emailErr.message);
+    }
 
     const token = jwt.sign(
       { id: user._id, role: user.role, modules: user.modules },
@@ -361,54 +367,36 @@ exports.resendOTP = async (req, res) => {
 };
 
 // ======================
-// LOGIN
-// ======================
-// ======================
-// LOGIN (with debug)
+// LOGIN (production ready – no debug logs)
 // ======================
 exports.login = async (req, res) => {
-  console.log('>>> Login endpoint hit');
   try {
     const { email, password } = req.body;
-    console.log('>>> Email:', email);
 
     if (!email || !password) {
-      console.log('>>> Missing credentials');
       return res.status(400).json({ success: false, message: 'Email and password required' });
     }
 
-    console.log('>>> Finding user...');
     const user = await User.findOne({ email });
     if (!user) {
-      console.log('>>> User not found');
       return res.status(404).json({ success: false, message: 'User not found' });
     }
-    console.log('>>> User found:', user._id);
 
     if (user.isDeleted) {
-      console.log('>>> User is soft deleted');
       return res.status(403).json({ success: false, message: 'Account is deactivated' });
     }
 
     if (!user.isVerified) {
-      console.log('>>> User not verified');
       return res.status(403).json({ success: false, message: 'Please verify your email first' });
     }
 
-    console.log('>>> Comparing password...');
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
-      console.log('>>> Password mismatch');
       return res.status(400).json({ success: false, message: 'Invalid credentials' });
     }
-    console.log('>>> Password matched');
 
-    console.log('>>> Calling updateLastLogin...');
-    console.log('>>> typeof user.updateLastLogin:', typeof user.updateLastLogin);
     await user.updateLastLogin(req.ip, req.headers['user-agent']);
-    console.log('>>> Last login updated');
 
-    console.log('>>> Generating token...');
     const token = jwt.sign(
       { id: user._id, role: user.role, modules: user.modules },
       process.env.JWT_SECRET,
@@ -420,11 +408,9 @@ exports.login = async (req, res) => {
     delete userData.otp;
     delete userData.otpExpire;
 
-    console.log('>>> Login successful, sending response');
     res.json({ success: true, message: 'Login successful', token, user: userData });
   } catch (error) {
-    console.error('>>> LOGIN ERROR:', error);
-    console.error('>>> Error stack:', error.stack);
+    console.error('Login error:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -447,7 +433,6 @@ exports.forgotPassword = async (req, res) => {
     await user.save();
 
     await sendEmail(email, otp).catch(err => console.error('Email error:', err));
-    console.log(`OTP for ${email}: ${otp}`); // For development
 
     res.json({ success: true, message: 'OTP sent to your email' });
   } catch (error) {
@@ -499,6 +484,13 @@ exports.resetPassword = async (req, res) => {
     user.otp = undefined;
     user.otpExpire = undefined;
     await user.save();
+
+    // 🆕 Send password reset confirmation email
+    try {
+      await sendEmail.sendPasswordReset(user.email, user.fullName);
+    } catch (emailErr) {
+      console.error('Password reset email failed:', emailErr.message);
+    }
 
     res.json({ success: true, message: 'Password reset successfully' });
   } catch (error) {
