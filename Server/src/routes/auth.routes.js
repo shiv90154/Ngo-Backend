@@ -1,23 +1,12 @@
 // src/routes/auth.routes.js
 const express = require('express');
-console.log('express loaded');
-
 const router = express.Router();
-console.log('router created');
-
 const multer = require('multer');
-console.log('multer loaded');
-
 const path = require('path');
 const fs = require('fs');
 
 const userController = require('../controllers/auth.controller');
 const { protect, restrictTo } = require('../middleware');
-console.log('protect type:', typeof protect);
-console.log('restrictTo type:', typeof restrictTo);
-console.log('userController loaded, login type:', typeof userController.login);
-console.log('userController keys:', Object.keys(userController));
-
 // Configure multer for temporary file storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -68,7 +57,9 @@ router.put(
     { name: 'profileImage', maxCount: 1 },
     { name: 'profilePicture', maxCount: 1 },
     { name: 'storeLogo', maxCount: 1 },
-  ])
+
+  ]),
+  userController.updateProfile
 );
 
 // Subordinates - two separate routes (NO OPTIONAL PARAM)
