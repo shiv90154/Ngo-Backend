@@ -14,7 +14,7 @@ const agricultureRoutes = require('./agriculture.Routes');
 const financeRoutes = require('./finance.routes');
 const mlmRoutes = require('./mlm.routes');
 const subscriptionRoutes = require('./subscription.routes');   // 🆕 Subscription routes
-
+const adRoutes = require('./ad.routes');                         // 🆕 Ad routes
 
 const searchController = require('../controllers/search.controller');
 
@@ -36,5 +36,6 @@ router.use('/agriculture', agricultureRoutes);
 router.use('/finance', financeRoutes);
 router.use('/mlm', mlmRoutes);
 router.use('/subscription', subscriptionRoutes);          // 🆕 Mount subscription routes
+router.use('/ads', adRoutes);                             // 🆕 Mount ad routes
 router.get('/search', require('../controllers/search.controller').globalSearch);
 module.exports = router;

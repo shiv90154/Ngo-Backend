@@ -68,4 +68,8 @@ router.get('/search/creators', protect, mediaController.searchCreators);
 // Become creator
 router.post('/become-creator', protect, mediaController.becomeCreator);
 
+// Ad tracking routes
+router.post('/ads/track-click', protect, mediaController.trackAdClick);
+// router.post('/ads/track-impression', protect, mediaController.trackAdImpression);
+
 module.exports = router;

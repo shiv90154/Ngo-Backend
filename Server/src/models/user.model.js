@@ -229,6 +229,25 @@ const userSchema = new mongoose.Schema(
       liveStreamingKey: String,
     },
     mediaPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MediaPost' }],
+    // ========== ADS & MONETIZATION ==========
+    adsSeen: [
+      {
+        campaignId: { type: mongoose.Schema.Types.ObjectId, ref: 'AdCampaign' },
+        seenAt: { type: Date, default: Date.now },
+        clicked: { type: Boolean, default: false },
+        clickedAt: Date,
+      }
+    ],
+    adPreferences: {
+      interestedCategories: [String], // e.g., ['agriculture', 'education', 'healthcare']
+      optOutOfPersonalizedAds: { type: Boolean, default: false },
+      maxAdsPerDay: { type: Number, default: 10 },
+    },
+    adBlockedCreators: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+
+    // ========== CRM & IT MODULE ==========
+    clients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Client' }],
+    projects: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Project' }],
 
     // ========== CRM & IT MODULE ==========
     clients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Client' }],
@@ -298,6 +317,7 @@ const userSchema = new mongoose.Schema(
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
+
   { timestamps: true }
 );
 
@@ -318,6 +338,10 @@ userSchema.index({ lastLogin: -1 });
 userSchema.index({ 'mediaCreatorProfile.isCreator': 1 });
 userSchema.index({ 'sellerProfile.isSeller': 1 });
 userSchema.index({ isDeleted: 1 });
+// Add these with your existing indexes (around line 350-370)
+userSchema.index({ 'adPreferences.optOutOfPersonalizedAds': 1 });
+userSchema.index({ adsSeen: 1 });
+userSchema.index({ adBlockedCreators: 1 });
 
 // ========== STATIC METHOD: Generate Unique Referral Code ==========
 userSchema.statics.generateUniqueReferralCode = async function () {
