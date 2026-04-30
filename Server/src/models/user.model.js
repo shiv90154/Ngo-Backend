@@ -85,7 +85,7 @@ const userSchema = new mongoose.Schema(
       match: [/^\d{12}$/, 'Aadhaar must be 12 digits'],
       unique: true,
       sparse: true,
-      default: null,
+      default: undefined,
       set: v => (v === '' ? null : v),
     },
     panNumber: {
@@ -94,7 +94,7 @@ const userSchema = new mongoose.Schema(
       uppercase: true,
       unique: true,
       sparse: true,
-      default: null,
+      default: undefined,
       set: v => (v === '' ? null : v),
     },
     aadhaarImage: String,
