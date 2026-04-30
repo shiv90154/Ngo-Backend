@@ -38,6 +38,60 @@ exports.getStats = async (req, res) => {
 };
 
 // ---------- USER MANAGEMENT ----------
+
+// 🆕 Admin creates a user directly (no OTP)
+exports.createUser = async (req, res) => {
+  try {
+    const { fullName, email, phone, password, role, modules, state, district, block, village, isActive } = req.body;
+
+    // Basic validation
+    if (!fullName || !email || !phone || !password) {
+      return res.status(400).json({ success: false, message: 'Full name, email, phone, and password are required' });
+    }
+
+    if (!/^\d{10}$/.test(phone)) {
+      return res.status(400).json({ success: false, message: 'Phone must be 10 digits' });
+    }
+
+    // Check uniqueness
+    const existing = await User.findOne({ $or: [{ email }, { phone }] });
+    if (existing) {
+      return res.status(400).json({ success: false, message: 'User with this email or phone already exists' });
+    }
+
+    const user = await User.create({
+      fullName,
+      email,
+      phone,
+      password,               // pre‑save hook will hash it
+      role: role || 'USER',
+      modules: modules || [],
+      state,
+      district,
+      block,
+      village,
+      isActive: isActive !== undefined ? isActive : true,
+      isVerified: true,       // admin‑created accounts are pre‑verified
+      createdBy: req.user.id,
+    });
+
+    // Remove sensitive fields before returning
+    const userData = user.toObject();
+    delete userData.password;
+    delete userData.otp;
+    delete userData.otpExpire;
+
+    res.status(201).json({ success: true, user: userData });
+  } catch (error) {
+    console.error('Admin create user error:', error);
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ success: false, message: messages.join(', ') });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 exports.getUsers = async (req, res) => {
   try {
     const { page = 1, limit = 10, role, search, hierarchyLevel } = req.query;
