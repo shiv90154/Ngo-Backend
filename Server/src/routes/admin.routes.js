@@ -16,6 +16,7 @@ router.use(restrictTo(...adminRoles));
 router.get('/stats', adminController.getStats);
 
 // Users
+router.post('/users', adminController.createUser);
 router.get('/users', adminController.getUsers);
 router.get('/users/export/csv', adminController.exportUsers);
 router.get('/users/:id', adminController.getUser);
