@@ -88,7 +88,7 @@ exports.getAvailableSlots = async (req, res) => {
     }
 
     // Find time slot configuration for this day
-    const daySlot = availability.timeSlots.find(s => s.day === dayOfWeek);
+    const daySlot = availability.timeSlots.find(s => s.day?.toLowerCase() === dayOfWeek);
     if (!daySlot) {
       return res.json({ success: true, slots: [] });
     }
@@ -248,8 +248,8 @@ exports.updateAppointmentStatus = async (req, res) => {
 
     // Authorization: only patient, doctor, or admin can update
     const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
-                         req.user.id === appointment.patientId.toString() ||
-                         req.user.id === appointment.doctorId.toString();
+      req.user.id === appointment.patientId.toString() ||
+      req.user.id === appointment.doctorId.toString();
 
     if (!isAuthorized) {
       return res.status(403).json({ success: false, message: 'Not authorized' });
@@ -286,26 +286,34 @@ exports.getPatientAppointments = async (req, res) => {
     const { status, page = 1, limit = 10 } = req.query;
 
     const filter = { patientId };
-    if (status) filter.status = status;
+
+    if (status) {
+      filter.status = status;
+    }
 
     const appointments = await Appointment.find(filter)
-      .populate('doctorId', 'fullName email doctorProfile profileImage')
-      .populate('prescriptionId')
+      .populate("doctorId", "fullName email doctorProfile  profileImage")
+      .populate("patientId", "fullName email phone profileImage")
       .sort({ appointmentDate: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(Number(limit))
+      .skip((Number(page) - 1) * Number(limit));
 
     const total = await Appointment.countDocuments(filter);
 
     res.json({
       success: true,
       appointments,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      totalPages: Math.ceil(total / Number(limit)),
+      currentPage: Number(page),
       total,
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error("Get patient appointments error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch appointments",
+      error: error.message,
+    });
   }
 };
 
@@ -351,7 +359,6 @@ exports.getAppointmentById = async (req, res) => {
     const appointment = await Appointment.findById(req.params.id)
       .populate('patientId', 'fullName email phone profileImage')
       .populate('doctorId', 'fullName email doctorProfile profileImage')
-      .populate('prescriptionId');
 
     if (!appointment) {
       return res.status(404).json({ success: false, message: 'Appointment not found' });
@@ -359,8 +366,8 @@ exports.getAppointmentById = async (req, res) => {
 
     // Authorization
     const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
-                         req.user.id === appointment.patientId.toString() ||
-                         req.user.id === appointment.doctorId.toString();
+      req.user.id === appointment.patientId.toString() ||
+      req.user.id === appointment.doctorId.toString();
 
     if (!isAuthorized) {
       return res.status(403).json({ success: false, message: 'Not authorized' });
@@ -439,6 +446,85 @@ exports.createPrescription = async (req, res) => {
   }
 };
 
+// Search Doctor's Patients
+exports.searchDoctorPatients = async (req, res) => {
+  try {
+    const doctorId = req.user.id;
+    const { search = "", page = 1, limit = 10 } = req.query;
+
+    if (req.user.role !== "DOCTOR") {
+      return res.status(403).json({
+        success: false,
+        message: "Only doctors can search patients",
+      });
+    }
+
+    const pageNumber = Math.max(Number(page) || 1, 1);
+    const limitNumber = Math.max(Number(limit) || 10, 1);
+
+    const appointments = await Appointment.find({ doctorId })
+      .populate("patientId", "fullName email phone profileImage gender dob")
+      .sort({ appointmentDate: -1 });
+
+    let patients = appointments
+      .filter((apt) => apt.patientId)
+      .map((apt) => ({
+        _id: apt.patientId._id,
+        fullName: apt.patientId.fullName,
+        email: apt.patientId.email,
+        phone: apt.patientId.phone,
+        profileImage: apt.patientId.profileImage,
+        gender: apt.patientId.gender,
+        dob: apt.patientId.dob,
+        lastAppointmentDate: apt.appointmentDate,
+        lastStatus: apt.status,
+      }));
+
+    const uniquePatientsMap = new Map();
+
+    patients.forEach((patient) => {
+      const id = patient._id.toString();
+
+      if (!uniquePatientsMap.has(id)) {
+        uniquePatientsMap.set(id, patient);
+      }
+    });
+
+    patients = Array.from(uniquePatientsMap.values());
+
+    if (search.trim()) {
+      const regex = new RegExp(search.trim(), "i");
+
+      patients = patients.filter(
+        (patient) =>
+          regex.test(patient.fullName || "") ||
+          regex.test(patient.email || "") ||
+          regex.test(patient.phone || "")
+      );
+    }
+
+    const total = patients.length;
+    const paginatedPatients = patients.slice(
+      (pageNumber - 1) * limitNumber,
+      pageNumber * limitNumber
+    );
+
+    res.json({
+      success: true,
+      patients: paginatedPatients,
+      total,
+      totalPages: Math.ceil(total / limitNumber),
+      currentPage: pageNumber,
+    });
+  } catch (error) {
+    console.error("Search doctor patients error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Unable to fetch patients",
+      error: error.message,
+    });
+  }
+};
 // Get Patient's Prescriptions
 exports.getPatientPrescriptions = async (req, res) => {
   try {
@@ -484,8 +570,8 @@ exports.getPrescriptionById = async (req, res) => {
 
     // Authorization
     const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
-                         req.user.id === prescription.patientId.toString() ||
-                         req.user.id === prescription.doctorId.toString();
+      req.user.id === prescription.patientId.toString() ||
+      req.user.id === prescription.doctorId.toString();
 
     if (!isAuthorized) {
       return res.status(403).json({ success: false, message: 'Not authorized' });
@@ -567,7 +653,7 @@ exports.addHealthRecord = async (req, res) => {
     // Cleanup uploaded files if error
     if (req.files) {
       for (const file of req.files.attachments || []) {
-        await fs.unlink(file.path).catch(() => {});
+        await fs.unlink(file.path).catch(() => { });
       }
     }
     res.status(500).json({ success: false, error: error.message });
@@ -626,8 +712,8 @@ exports.getHealthRecordById = async (req, res) => {
 
     // Authorization
     const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
-                         req.user.id === record.patientId.toString() ||
-                         (req.user.role === 'DOCTOR' && (!record.isPrivate || req.user.id === record.doctorId?.toString()));
+      req.user.id === record.patientId.toString() ||
+      (req.user.role === 'DOCTOR' && (!record.isPrivate || req.user.id === record.doctorId?.toString()));
 
     if (!isAuthorized) {
       return res.status(403).json({ success: false, message: 'Not authorized' });
@@ -655,7 +741,7 @@ exports.deleteHealthRecord = async (req, res) => {
     // Delete attached files
     for (const attachment of record.attachments) {
       const filePath = path.join(__dirname, '..', attachment.fileUrl);
-      await fs.unlink(filePath).catch(() => {});
+      await fs.unlink(filePath).catch(() => { });
     }
 
     await HealthRecord.findByIdAndDelete(req.params.id);
@@ -676,29 +762,117 @@ exports.deleteHealthRecord = async (req, res) => {
 // ======================
 exports.searchDoctors = async (req, res) => {
   try {
-    const { specialization, state, district, page = 1, limit = 10 } = req.query;
+    const { search = "", page = 1, limit = 10 } = req.query;
 
-    const filter = { role: 'DOCTOR', isVerified: true, isDeleted: false };
-    if (specialization) filter['doctorProfile.specialization'] = { $regex: specialization, $options: 'i' };
-    if (state) filter.state = state;
-    if (district) filter.district = district;
+    const pageNumber = Math.max(Number(page) || 1, 1);
+    const limitNumber = Math.max(Number(limit) || 10, 1);
+
+    const filter = {
+      role: "DOCTOR",
+      isVerified: true,
+      isDeleted: false,
+    };
+
+    const searchText = search.trim();
+
+    if (searchText) {
+      const regex = new RegExp(searchText, "i");
+
+      filter.$or = [
+        { fullName: regex },
+        { "doctorProfile.specialization": regex },
+        { state: regex },
+        { district: regex },
+        { city: regex },
+      ];
+    }
 
     const doctors = await User.find(filter)
-      .select('fullName email phone profileImage doctorProfile state district')
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .sort({ 'doctorProfile.experienceYears': -1 });
+      .select(
+        "fullName email phone profileImage doctorProfile state district city isActive rating"
+      )
+      .skip((pageNumber - 1) * limitNumber)
+      .limit(limitNumber)
+      .sort({ "doctorProfile.experienceYears": -1 });
 
     const total = await User.countDocuments(filter);
 
     res.json({
       success: true,
       doctors,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      totalPages: Math.ceil(total / limitNumber),
+      currentPage: pageNumber,
       total,
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Unable to fetch doctors",
+      error: error.message,
+    });
+  }
+};
+// ======================
+// DOCTOR DASHBOARD
+// ======================
+exports.getDoctorDashboard = async (req, res) => {
+  try {
+    const doctorId = req.user.id;
+
+    // Total Appointments
+    const totalAppointments = await Appointment.countDocuments({ doctorId });
+
+    // Total Patients (unique)
+    const appointments = await Appointment.find({ doctorId }).select("patientId");
+    const uniquePatients = new Set(
+      appointments.map((a) => a.patientId?.toString())
+    );
+
+    const totalPatients = uniquePatients.size;
+
+    // Total Prescriptions
+    const totalPrescriptions = await Prescription.countDocuments({ doctorId });
+
+    // Total Revenue (only completed appointments)
+    const revenueAgg = await Appointment.aggregate([
+      {
+        $match: {
+          doctorId: new require("mongoose").Types.ObjectId(doctorId),
+          status: "completed",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: "$payment.amount" },
+        },
+      },
+    ]);
+
+    const totalRevenue = revenueAgg[0]?.totalRevenue || 0;
+
+    // Recent Appointments
+    const recentAppointments = await Appointment.find({ doctorId })
+      .populate("patientId", "fullName email profileImage")
+      .sort({ appointmentDate: -1 })
+      .limit(10);
+
+    res.json({
+      success: true,
+      stats: {
+        totalAppointments,
+        totalPatients,
+        totalPrescriptions,
+        totalRevenue,
+      },
+      recentAppointments,
+    });
+  } catch (error) {
+    console.error("Doctor dashboard error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to load dashboard",
+      error: error.message,
+    });
   }
 };

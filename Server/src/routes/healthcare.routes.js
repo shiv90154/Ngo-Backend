@@ -22,7 +22,7 @@ router.post('/prescriptions', protect, authorize('DOCTOR'), healthcareController
 // 🆕 FIX: Optional patientId ke liye do separate routes
 router.get('/prescriptions/patient', protect, healthcareController.getPatientPrescriptions); // logged-in user ke liye
 router.get('/prescriptions/patient/:patientId', protect, healthcareController.getPatientPrescriptions); // specific patient (doctor/admin)
-
+router.get("/doctor/patients", protect, healthcareController.searchDoctorPatients);
 router.get('/prescriptions/:id', protect, healthcareController.getPrescriptionById);
 
 // Health Records
@@ -37,5 +37,6 @@ router.delete('/records/:id', protect, healthcareController.deleteHealthRecord);
 
 // Search
 router.get('/doctors/search', protect, healthcareController.searchDoctors);
+router.get("/doctor/dashboard", protect, healthcareController.getDoctorDashboard);
 
 module.exports = router;

@@ -36,7 +36,7 @@ const shutdown = async () => {
         if (typeof disconnectDB === 'function') {
           await disconnectDB();
         }
-      } catch (err) {}
+      } catch (err) { }
       process.exit(0);
     });
 
