@@ -266,7 +266,34 @@ exports.getUserPosts = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+exports.getCreatorProfile = async (req, res) => {
+  try {
+    const { userId } = req.params;
 
+    const user = await User.findById(userId)
+      .select(
+        'fullName email phone profileImage socialProfile mediaCreatorProfile state district block village createdAt'
+      )
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    res.json({
+      success: true,
+      user,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+};
 // ---------- FEED ----------
 exports.getFeed = async (req, res) => {
   try {

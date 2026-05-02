@@ -38,6 +38,7 @@ router.post('/posts', protect, upload.array('media', 10), mediaController.create
 router.get('/posts/:id', protect, mediaController.getPost);
 router.put('/posts/:id', protect, mediaController.updatePost);
 router.delete('/posts/:id', protect, mediaController.deletePost);
+router.get('/users/:userId/profile', protect, mediaController.getCreatorProfile);
 router.get('/users/:userId/posts', protect, mediaController.getUserPosts);
 
 // Likes
