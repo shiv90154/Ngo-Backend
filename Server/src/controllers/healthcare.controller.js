@@ -2,6 +2,7 @@ const Appointment = require('../models/Appointment');
 const Prescription = require('../models/Prescription');
 const HealthRecord = require('../models/HealthRecord');
 const DoctorAvailability = require('../models/DoctorAvailability');
+const mongoose = require('mongoose');
 const User = require('../models/user.model');
 const path = require('path');
 const fs = require('fs').promises;
@@ -165,7 +166,7 @@ exports.bookAppointment = async (req, res) => {
     // Check doctor availability
     const availability = await DoctorAvailability.findOne({ doctorId });
     if (!availability || !availability.isAcceptingAppointments) {
-      return res.status(400).json({ success: false, message: 'Doctor not accepting appointments' });
+      return res.status(409).json({ success: false, message: 'Doctor not accepting appointments' });
     }
 
     // Validate consultation mode
@@ -561,25 +562,44 @@ exports.getPatientPrescriptions = async (req, res) => {
 exports.getPrescriptionById = async (req, res) => {
   try {
     const prescription = await Prescription.findById(req.params.id)
-      .populate('patientId', 'fullName email phone dob gender')
-      .populate('doctorId', 'fullName doctorProfile profileImage');
+      .populate("patientId", "fullName email phone dob gender profileImage")
+      .populate("doctorId", "fullName email doctorProfile profileImage");
 
     if (!prescription) {
-      return res.status(404).json({ success: false, message: 'Prescription not found' });
+      return res.status(404).json({
+        success: false,
+        message: "Prescription not found",
+      });
     }
 
-    // Authorization
-    const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
-      req.user.id === prescription.patientId.toString() ||
-      req.user.id === prescription.doctorId.toString();
+    const patientId = prescription.patientId?._id?.toString();
+    const doctorId = prescription.doctorId?._id?.toString();
+    const loggedInUserId = req.user.id?.toString();
+
+    const isAuthorized =
+      req.user.role === "SUPER_ADMIN" ||
+      loggedInUserId === patientId ||
+      loggedInUserId === doctorId;
 
     if (!isAuthorized) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized",
+      });
     }
 
-    res.json({ success: true, prescription });
+    return res.json({
+      success: true,
+      prescription,
+    });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error("Get prescription by ID error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch prescription",
+      error: error.message,
+    });
   }
 };
 
@@ -815,45 +835,59 @@ exports.searchDoctors = async (req, res) => {
 // ======================
 // DOCTOR DASHBOARD
 // ======================
+
 exports.getDoctorDashboard = async (req, res) => {
   try {
     const doctorId = req.user.id;
 
-    // Total Appointments
-    const totalAppointments = await Appointment.countDocuments({ doctorId });
+    const doctorObjectId = new mongoose.Types.ObjectId(doctorId);
 
-    // Total Patients (unique)
-    const appointments = await Appointment.find({ doctorId }).select("patientId");
+    const totalAppointments = await Appointment.countDocuments({
+      doctorId: doctorObjectId,
+    });
+
+    const appointments = await Appointment.find({
+      doctorId: doctorObjectId,
+      patientId: { $exists: true, $ne: null },
+    }).select("patientId");
+
     const uniquePatients = new Set(
-      appointments.map((a) => a.patientId?.toString())
+      appointments
+        .map((a) => a.patientId?.toString())
+        .filter(Boolean)
     );
 
     const totalPatients = uniquePatients.size;
 
-    // Total Prescriptions
-    const totalPrescriptions = await Prescription.countDocuments({ doctorId });
+    const totalPrescriptions = await Prescription.countDocuments({
+      doctorId: doctorObjectId,
+    });
 
-    // Total Revenue (only completed appointments)
     const revenueAgg = await Appointment.aggregate([
       {
         $match: {
-          doctorId: new require("mongoose").Types.ObjectId(doctorId),
+          doctorId: doctorObjectId,
           status: "completed",
         },
       },
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: "$payment.amount" },
+          totalRevenue: {
+            $sum: {
+              $ifNull: ["$payment.amount", 0],
+            },
+          },
         },
       },
     ]);
 
     const totalRevenue = revenueAgg[0]?.totalRevenue || 0;
 
-    // Recent Appointments
-    const recentAppointments = await Appointment.find({ doctorId })
-      .populate("patientId", "fullName email profileImage")
+    const recentAppointments = await Appointment.find({
+      doctorId: doctorObjectId,
+    })
+      .populate("patientId", "fullName email phone profileImage")
       .sort({ appointmentDate: -1 })
       .limit(10);
 
