@@ -8,12 +8,18 @@ const roleLevelMap = {
   DISTRICT_MANAGER: 3,
   DISTRICT_PRESIDENT: 4,
   FIELD_OFFICER: 5,
-  BLOCK_OFFICER: 6,
-  VILLAGE_OFFICER: 7,
-  DOCTOR: 8,
-  TEACHER: 8,
-  AGENT: 8,
-  USER: 9,
+  JILLA_BRANCH_MANAGER: 5,      // same level as FIELD_OFFICER
+  JILLA_ADYAKSH: 5,
+  JILLA_FIELD_OFFICER: 6,
+  BLOCK_OFFICER: 7,
+  VILLAGE_OFFICER: 8,
+  GRAM_BIKAS_ADHIKARI: 9,       // village level agent
+  DOCTOR: 10,
+  TEACHER: 10,
+  AGENT: 10,
+  NGO: 11,                       // NGO & Club at lower operational level
+  CLUB: 11,
+  USER: 12,
 };
 
 const userSchema = new mongoose.Schema(
@@ -48,11 +54,17 @@ const userSchema = new mongoose.Schema(
         'DISTRICT_MANAGER',
         'DISTRICT_PRESIDENT',
         'FIELD_OFFICER',
+        'JILLA_BRANCH_MANAGER',
+        'JILLA_ADYAKSH',
+        'JILLA_FIELD_OFFICER',
         'BLOCK_OFFICER',
         'VILLAGE_OFFICER',
+        'GRAM_BIKAS_ADHIKARI',
         'DOCTOR',
         'TEACHER',
         'AGENT',
+        'NGO',
+        'CLUB',
         'USER',
       ],
       default: 'USER',
@@ -157,6 +169,22 @@ const userSchema = new mongoose.Schema(
       registrationNumber: { type: String, trim: true },
       availableSlots: [Date],
     },
+    doctorVerification: {
+      degreeCertificate: String,
+      medicalCouncilRegNumber: String,
+      registrationCertificate: String,
+      qualification: String,
+      college: String,
+      yearOfPassing: Number,
+      verificationStatus: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected'],
+        default: 'pending',
+      },
+      verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      verificationDate: Date,
+      rejectionReason: String,
+    },
     patients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     appointments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Appointment' }],
     healthRecords: [
@@ -218,6 +246,14 @@ const userSchema = new mongoose.Schema(
     commissionRate: { type: Number, default: 0, min: 0, max: 100 },
     totalCommissionEarned: { type: Number, default: 0 },
 
+    // ========== LICENSE SALES TRACKING ==========
+    licenseStats: {
+      totalLicensesSold: { type: Number, default: 0 },
+      monthlyLicensesSold: { type: Number, default: 0 },
+      lastMonthReset: Date,
+      salaryEligible: { type: Boolean, default: false },
+    },
+
     // ========== NEWS & MEDIA MODULE ==========
     mediaCreatorProfile: {
       isCreator: { type: Boolean, default: false },
@@ -229,6 +265,7 @@ const userSchema = new mongoose.Schema(
       liveStreamingKey: String,
     },
     mediaPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MediaPost' }],
+
     // ========== ADS & MONETIZATION ==========
     adsSeen: [
       {
@@ -239,15 +276,11 @@ const userSchema = new mongoose.Schema(
       }
     ],
     adPreferences: {
-      interestedCategories: [String], // e.g., ['agriculture', 'education', 'healthcare']
+      interestedCategories: [String],
       optOutOfPersonalizedAds: { type: Boolean, default: false },
       maxAdsPerDay: { type: Number, default: 10 },
     },
     adBlockedCreators: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-
-    // ========== CRM & IT MODULE ==========
-    clients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Client' }],
-    projects: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Project' }],
 
     // ========== CRM & IT MODULE ==========
     clients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Client' }],
@@ -338,10 +371,11 @@ userSchema.index({ lastLogin: -1 });
 userSchema.index({ 'mediaCreatorProfile.isCreator': 1 });
 userSchema.index({ 'sellerProfile.isSeller': 1 });
 userSchema.index({ isDeleted: 1 });
-// Add these with your existing indexes (around line 350-370)
 userSchema.index({ 'adPreferences.optOutOfPersonalizedAds': 1 });
 userSchema.index({ adsSeen: 1 });
 userSchema.index({ adBlockedCreators: 1 });
+userSchema.index({ 'doctorVerification.verificationStatus': 1 });
+userSchema.index({ 'licenseStats.totalLicensesSold': 1 });
 
 // ========== STATIC METHOD: Generate Unique Referral Code ==========
 userSchema.statics.generateUniqueReferralCode = async function () {
@@ -355,22 +389,19 @@ userSchema.statics.generateUniqueReferralCode = async function () {
   return code;
 };
 
-// ========== PRE‑SAVE HOOKS (FIXED - No `next` parameter) ==========
+// ========== PRE‑SAVE HOOKS ==========
 userSchema.pre('save', async function () {
-  // Hash password if modified
   if (this.isModified('password')) {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
   }
 
-  // Generate unique referral code for new users
   if (this.isNew && !this.referralCode) {
     this.referralCode = await this.constructor.generateUniqueReferralCode();
   }
 
-  // Set hierarchyLevel based on role if not provided
   if (this.isNew && !this.hierarchyLevel) {
-    this.hierarchyLevel = roleLevelMap[this.role] || 9;
+    this.hierarchyLevel = roleLevelMap[this.role] || 12;
   }
 });
 

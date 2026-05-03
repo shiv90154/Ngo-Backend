@@ -3,9 +3,10 @@ const Prescription = require('../models/Prescription');
 const HealthRecord = require('../models/HealthRecord');
 const DoctorAvailability = require('../models/DoctorAvailability');
 const User = require('../models/user.model');
+const Medicine = require('../models/Medicine');            // 🆕 for prescription-to-order
 const path = require('path');
 const fs = require('fs').promises;
-const mailer = require('../utils/sendEmail');   // 🆕 email service
+const mailer = require('../utils/sendEmail');
 
 const uploadDir = path.join(__dirname, '../uploads/healthcare');
 (async () => {
@@ -212,7 +213,7 @@ exports.bookAppointment = async (req, res) => {
     await appointment.populate('patientId', 'fullName email phone');
     await appointment.populate('doctorId', 'fullName email doctorProfile');
 
-    // 🆕 Send appointment confirmation email
+    // Send appointment confirmation email
     try {
       await mailer.sendAppointmentConfirmation(
         appointment.patientId.email,
@@ -418,7 +419,7 @@ exports.createPrescription = async (req, res) => {
     await prescription.populate('patientId', 'fullName email');
     await prescription.populate('doctorId', 'fullName doctorProfile');
 
-    // 🆕 Send prescription notification email
+    // Send prescription notification email
     try {
       await mailer.sendPrescriptionNotification(
         prescription.patientId.email,
@@ -672,13 +673,18 @@ exports.deleteHealthRecord = async (req, res) => {
 };
 
 // ======================
-// DOCTOR SEARCH
+// DOCTOR SEARCH (ONLY VERIFIED)
 // ======================
 exports.searchDoctors = async (req, res) => {
   try {
     const { specialization, state, district, page = 1, limit = 10 } = req.query;
 
-    const filter = { role: 'DOCTOR', isVerified: true, isDeleted: false };
+    const filter = {
+      role: 'DOCTOR',
+      isVerified: true,
+      isDeleted: false,
+      'doctorVerification.verificationStatus': 'approved'    // 🆕 only verified doctors appear
+    };
     if (specialization) filter['doctorProfile.specialization'] = { $regex: specialization, $options: 'i' };
     if (state) filter.state = state;
     if (district) filter.district = district;
@@ -698,6 +704,193 @@ exports.searchDoctors = async (req, res) => {
       currentPage: page,
       total,
     });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// 🆕 ORDER FROM PRESCRIPTION
+// ======================
+exports.orderFromPrescription = async (req, res) => {
+  try {
+    const prescription = await Prescription.findById(req.params.id);
+    if (!prescription) return res.status(404).json({ success: false, message: 'Prescription not found' });
+
+    // Authorization: patient or admin
+    if (req.user.id !== prescription.patientId.toString() && req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    // Build order items from prescribed medicines
+    const orderItems = [];
+    for (const med of prescription.medicines) {
+      const medicine = await Medicine.findOne({ name: med.name });
+      if (medicine) {
+        orderItems.push({
+          medicine: medicine._id,
+          name: medicine.name,
+          quantity: 1,   // default quantity (you can later adjust by duration)
+          price: medicine.price,
+        });
+      }
+    }
+
+    if (orderItems.length === 0) {
+      return res.status(400).json({ success: false, message: 'No matching medicines found in catalogue' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Medicines ready to add to cart',
+      items: orderItems,
+      prescriptionId: prescription._id,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// 🆕 DOCTOR VERIFICATION (ADMIN)
+// ======================
+
+// GET all pending doctor verifications
+exports.getPendingDoctors = async (req, res) => {
+  try {
+    const doctors = await User.find({
+      role: 'DOCTOR',
+      'doctorVerification.verificationStatus': 'pending'
+    }).select('fullName email phone doctorProfile doctorVerification');
+    res.json({ success: true, doctors });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Approve a doctor
+exports.verifyDoctor = async (req, res) => {
+  try {
+    const doctor = await User.findById(req.params.doctorId);
+    if (!doctor || doctor.role !== 'DOCTOR') {
+      return res.status(404).json({ success: false, message: 'Doctor not found' });
+    }
+    doctor.doctorVerification.verificationStatus = 'approved';
+    doctor.doctorVerification.verifiedBy = req.user.id;
+    doctor.doctorVerification.verificationDate = new Date();
+    await doctor.save();
+
+    // Optional: send approval email
+    try {
+      await mailer.sendDoctorVerificationApproved(doctor.email, doctor.fullName);
+    } catch(e) { console.log('Email error:', e.message); }
+
+    res.json({ success: true, message: 'Doctor verified successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+
+exports.getDoctorDashboard = async (req, res) => {
+  try {
+    const doctorId = req.user.id;
+
+    const [totalAppointments, patientIds, totalPrescriptions, recentAppointments] =
+      await Promise.all([
+        Appointment.countDocuments({ doctorId }),
+        Appointment.distinct('patientId', { doctorId }),
+        Prescription.countDocuments({ doctorId }),
+        Appointment.find({ doctorId })
+          .sort({ appointmentDate: -1 })
+          .limit(5)
+          .populate('patientId', 'fullName email phone profileImage')
+          .lean(),
+      ]);
+
+    // Revenue from completed appointments
+    const revenueData = await Appointment.aggregate([
+      {
+        $match: {
+          doctorId: mongoose.Types.ObjectId(doctorId),
+          status: 'completed',
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: '$payment.amount' },
+        },
+      },
+    ]);
+    const totalRevenue = revenueData[0]?.totalRevenue || 0;
+
+    res.json({
+      success: true,
+      stats: {
+        totalAppointments,
+        totalPatients: patientIds.length,
+        totalPrescriptions,
+        totalRevenue,
+      },
+      recentAppointments,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// 🆕 DOCTOR PATIENTS LIST
+// ======================
+exports.getDoctorPatients = async (req, res) => {
+  try {
+    const doctorId = req.user.id;
+    const { search, page = 1, limit = 20 } = req.query;
+
+    // Get unique patient IDs from appointments
+    const patientIds = await Appointment.distinct('patientId', { doctorId });
+
+    let filter = { _id: { $in: patientIds } };
+    if (search) {
+      filter.$or = [
+        { fullName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const patients = await User.find(filter)
+      .select('fullName email phone profileImage doctorProfile')
+      .skip((page - 1) * limit)
+      .limit(Number(limit))
+      .lean();
+
+    const total = await User.countDocuments(filter);
+
+    res.json({
+      success: true,
+      patients,
+      totalPages: Math.ceil(total / limit),
+      currentPage: Number(page),
+      total,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+// Reject a doctor
+exports.rejectDoctor = async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const doctor = await User.findById(req.params.doctorId);
+    if (!doctor || doctor.role !== 'DOCTOR') {
+      return res.status(404).json({ success: false, message: 'Doctor not found' });
+    }
+    doctor.doctorVerification.verificationStatus = 'rejected';
+    doctor.doctorVerification.rejectionReason = reason || 'No reason provided';
+    await doctor.save();
+    res.json({ success: true, message: 'Doctor rejected' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

@@ -14,11 +14,17 @@ const VALID_ROLES = [
   'DISTRICT_MANAGER',
   'DISTRICT_PRESIDENT',
   'FIELD_OFFICER',
+  'JILLA_BRANCH_MANAGER',
+  'JILLA_ADYAKSH',
+  'JILLA_FIELD_OFFICER',
   'BLOCK_OFFICER',
   'VILLAGE_OFFICER',
+  'GRAM_BIKAS_ADHIKARI',
   'DOCTOR',
   'TEACHER',
   'AGENT',
+  'NGO',
+  'CLUB',
   'USER',
   'ADMIN'
 ];
@@ -39,7 +45,6 @@ const hashOTP = async (otp) => {
 };
 const verifyOTP = async (plainOtp, hashedOtp) => bcrypt.compare(plainOtp, hashedOtp);
 
-// Helper to parse comma-separated string to array
 const parseArray = (value) => {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -64,18 +69,27 @@ exports.register = async (req, res) => {
       aadhaarNumber, aadharCard, panNumber, panCard, voterId, passportNumber,
       state, district, block, village, pincode, fullAddress,
       reportsTo, sponsorId,
+      // TEACHER
       specialization, qualifications, experienceYears,
-      doctorSpecialization, doctorExperience, consultationFee, registrationNumber, bloodGroup,
-      allergies, medicalHistory,
-      emergencyContactName, emergencyContactRelation, emergencyContactPhone,
+      // DOCTOR
+      doctorSpecialization, doctorExperience, consultationFee, registrationNumber,
+      // DOCTOR VERIFICATION
+      qualification, college, yearOfPassing, medicalCouncilRegNumber,
+      // FARMER
       isContractFarmer, farmLocation, irrigationType,
+      // STUDENT
       className, schoolName, board, percentage,
+      // IT
       projectType, techStack, experience,
+      // SOCIAL
       username, bio, interests,
+      // BANK
       bankAccount,
-      commissionRate,
+      // MEDIA
       isMediaCreator,
+      // SELLER
       isSeller, storeName, gstNumber,
+      // QA
       developedBy, testedBy, qaStatus
     } = req.body;
 
@@ -106,7 +120,7 @@ exports.register = async (req, res) => {
       userModules = Array.isArray(modules) ? modules : [modules];
     } else {
       if (finalAadhaar || finalPan || voterId || passportNumber) userModules.push('FINANCE');
-      if (bloodGroup || allergies || medicalHistory || emergencyContactName) userModules.push('HEALTHCARE');
+      if (doctorSpecialization || registrationNumber || qualification || college) userModules.push('HEALTHCARE');
       if (farmLocation || irrigationType) userModules.push('AGRICULTURE');
       if (className || schoolName || board || percentage) userModules.push('EDUCATION');
       if (projectType || techStack || experience) userModules.push('IT');
@@ -129,19 +143,12 @@ exports.register = async (req, res) => {
       panNumber: finalPan,
       voterId, passportNumber,
       state, district, block, village, pincode, fullAddress,
-      bloodGroup, allergies, medicalHistory,
-      emergencyContact: {
-        name: emergencyContactName,
-        relationship: emergencyContactRelation,
-        phone: emergencyContactPhone,
-      },
       otp: hashedOtp,
       otpExpire: Date.now() + 5 * 60 * 1000,
       reportsTo: reportsTo || null,
       sponsorId: sponsorId || null,
       createdBy: req.user ? req.user.id : null,
       updatedBy: req.user ? req.user.id : null,
-      // New fields initialization
       aiUsage: {
         diseaseDetectionCount: 0,
         aiTokensRemaining: 10,
@@ -155,6 +162,12 @@ exports.register = async (req, res) => {
       developedBy: developedBy || null,
       testedBy: testedBy || null,
       qaStatus: qaStatus || 'pending',
+      licenseStats: {
+        totalLicensesSold: 0,
+        monthlyLicensesSold: 0,
+        lastMonthReset: new Date(),
+        salaryEligible: false,
+      },
     };
 
     // Teacher profile
@@ -174,6 +187,13 @@ exports.register = async (req, res) => {
         experienceYears: doctorExperience ? parseInt(doctorExperience) : 0,
         consultationFee: consultationFee ? parseFloat(consultationFee) : 0,
         registrationNumber: registrationNumber || '',
+      };
+      userData.doctorVerification = {
+        qualification: qualification || '',
+        college: college || '',
+        yearOfPassing: yearOfPassing ? parseInt(yearOfPassing) : null,
+        medicalCouncilRegNumber: medicalCouncilRegNumber || '',
+        verificationStatus: 'pending',
       };
     }
 
@@ -247,11 +267,6 @@ exports.register = async (req, res) => {
       }
     }
 
-    // Agent commission rate
-    if (mappedRole === 'AGENT' && commissionRate !== undefined) {
-      userData.commissionRate = parseFloat(commissionRate);
-    }
-
     const user = new User(userData);
 
     // Handle file uploads
@@ -263,16 +278,32 @@ exports.register = async (req, res) => {
           const fileName = `${Date.now()}_${prefix}_${Math.random().toString(36).substring(2)}${ext}`;
           const newPath = path.join(uploadDir, fileName);
           await fs.rename(file.path, newPath);
-          user[fieldName] = `/uploads/${fileName}`;
+          return `/uploads/${fileName}`;
         }
+        return null;
       };
-      await moveFile('profileImage', 'profile');
-      await moveFile('profilePicture', 'profile');
-      await moveFile('aadhaarImage', 'aadhaar');
-      await moveFile('aadharDocument', 'aadhaar');
-      await moveFile('panImage', 'pan');
-      await moveFile('panDocument', 'pan');
-      await moveFile('storeLogo', 'store_logo');
+
+      // Common uploads
+      const profileImage = await moveFile('profileImage', 'profile') || await moveFile('profilePicture', 'profile');
+      if (profileImage) user.profileImage = profileImage;
+
+      const aadhaarImg = await moveFile('aadhaarImage', 'aadhaar') || await moveFile('aadharDocument', 'aadhaar');
+      if (aadhaarImg) user.aadhaarImage = aadhaarImg;
+
+      const panImg = await moveFile('panImage', 'pan') || await moveFile('panDocument', 'pan');
+      if (panImg) user.panImage = panImg;
+
+      const storeLogo = await moveFile('storeLogo', 'store_logo');
+      if (storeLogo && user.sellerProfile) user.sellerProfile.storeLogo = storeLogo;
+
+      // Doctor verification files
+      const degreeCert = await moveFile('degreeCertificate', 'degree');
+      const regCert = await moveFile('registrationCertificate', 'regcert');
+      if (degreeCert || regCert) {
+        user.doctorVerification = user.doctorVerification || {};
+        if (degreeCert) user.doctorVerification.degreeCertificate = degreeCert;
+        if (regCert) user.doctorVerification.registrationCertificate = regCert;
+      }
     }
 
     await user.save();
@@ -287,7 +318,7 @@ exports.register = async (req, res) => {
     if (req.files) {
       for (const field in req.files) {
         for (const file of req.files[field]) {
-          await fs.unlink(file.path).catch(() => { });
+          await fs.unlink(file.path).catch(() => {});
         }
       }
     }
@@ -320,7 +351,6 @@ exports.verifyOTP = async (req, res) => {
     user.otpExpire = null;
     await user.save();
 
-    // 🆕 Send welcome email
     try {
       await sendEmail.sendWelcome(user.email, user.fullName);
     } catch (emailErr) {
@@ -367,33 +397,21 @@ exports.resendOTP = async (req, res) => {
 };
 
 // ======================
-// LOGIN (production ready – no debug logs)
+// LOGIN
 // ======================
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
-
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email and password required' });
     }
-
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-
-    if (user.isDeleted) {
-      return res.status(403).json({ success: false, message: 'Account is deactivated' });
-    }
-
-    if (!user.isVerified) {
-      return res.status(403).json({ success: false, message: 'Please verify your email first' });
-    }
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.isDeleted) return res.status(403).json({ success: false, message: 'Account is deactivated' });
+    if (!user.isVerified) return res.status(403).json({ success: false, message: 'Please verify your email first' });
 
     const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(400).json({ success: false, message: 'Invalid credentials' });
-    }
+    if (!isMatch) return res.status(400).json({ success: false, message: 'Invalid credentials' });
 
     await user.updateLastLogin(req.ip, req.headers['user-agent']);
 
@@ -422,14 +440,13 @@ exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
-
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     const otp = generateOTP();
     const hashedOtp = await hashOTP(otp);
     user.otp = hashedOtp;
-    user.otpExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+    user.otpExpire = Date.now() + 10 * 60 * 1000;
     await user.save();
 
     await sendEmail(email, otp).catch(err => console.error('Email error:', err));
@@ -449,14 +466,11 @@ exports.verifyResetOtp = async (req, res) => {
     if (!email || !otp) {
       return res.status(400).json({ success: false, message: 'Email and OTP are required' });
     }
-
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
     if (!user.otp || !(await verifyOTP(otp, user.otp)) || user.otpExpire < Date.now()) {
       return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
     }
-
     res.json({ success: true, message: 'OTP verified' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -472,10 +486,8 @@ exports.resetPassword = async (req, res) => {
     if (!email || !otp || !newPassword) {
       return res.status(400).json({ success: false, message: 'All fields are required' });
     }
-
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
     if (!user.otp || !(await verifyOTP(otp, user.otp)) || user.otpExpire < Date.now()) {
       return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
     }
@@ -485,7 +497,6 @@ exports.resetPassword = async (req, res) => {
     user.otpExpire = undefined;
     await user.save();
 
-    // 🆕 Send password reset confirmation email
     try {
       await sendEmail.sendPasswordReset(user.email, user.fullName);
     } catch (emailErr) {
@@ -524,65 +535,36 @@ exports.updateProfile = async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
+    // File helper
     const moveFile = async (fieldName, prefix) => {
       const file = req.files?.[fieldName]?.[0];
-      if (file) {
-        if (user[fieldName]) {
-          const oldPath = path.join(__dirname, '../', user[fieldName]);
-          await fs.unlink(oldPath).catch(() => { });
-        }
-        const ext = path.extname(file.originalname);
-        const fileName = `${Date.now()}_${prefix}_${Math.random().toString(36).substring(2)}${ext}`;
-        const newPath = path.join(uploadDir, fileName);
-        await fs.rename(file.path, newPath);
-        user[fieldName] = `/uploads/${fileName}`;
-        return fileName;
+      if (!file) return null;
+      if (user[fieldName]) {
+        const oldPath = path.join(__dirname, '../', user[fieldName]);
+        await fs.unlink(oldPath).catch(() => {});
       }
-      return null;
+      const ext = path.extname(file.originalname);
+      const fileName = `${Date.now()}_${prefix}_${Math.random().toString(36).substring(2)}${ext}`;
+      const newPath = path.join(uploadDir, fileName);
+      await fs.rename(file.path, newPath);
+      const url = `/uploads/${fileName}`;
+      user[fieldName] = url;
+      return url;
     };
 
+    // Move common files
     await moveFile('profileImage', 'profile');
     await moveFile('profilePicture', 'profile');
-    const logoFileName = await moveFile('storeLogo', 'store_logo');
-    if (logoFileName && user.sellerProfile) {
-      user.sellerProfile.storeLogo = `/uploads/${logoFileName}`;
-    }
+    await moveFile('storeLogo', 'store_logo');
 
+    // Basic fields
     const simpleFields = [
       'fullName', 'phone', 'fatherName', 'motherName', 'dob', 'gender',
       'state', 'district', 'block', 'village', 'pincode', 'fullAddress',
-      'aadhaarNumber', 'panNumber', 'bloodGroup', 'allergies', 'medicalHistory',
-      'voterId', 'passportNumber'
+      'aadhaarNumber', 'panNumber', 'voterId', 'passportNumber',
     ];
     for (const key of simpleFields) {
       if (req.body[key] !== undefined) user[key] = req.body[key];
-    }
-
-    // Update new fields (some admin-only in practice but we allow for completeness)
-    if (req.body.twoFactorEnabled !== undefined) {
-      user.twoFactorEnabled = req.body.twoFactorEnabled === 'true' || req.body.twoFactorEnabled === true;
-    }
-    if (req.body.developedBy !== undefined) user.developedBy = req.body.developedBy;
-    if (req.body.testedBy !== undefined) user.testedBy = req.body.testedBy;
-    if (req.body.qaStatus !== undefined) user.qaStatus = req.body.qaStatus;
-
-    // AI token replenish (admin only)
-    if (req.body.aiTokensRemaining !== undefined && req.user.role === 'SUPER_ADMIN') {
-      user.aiUsage = user.aiUsage || {};
-      user.aiUsage.aiTokensRemaining = parseInt(req.body.aiTokensRemaining);
-    }
-
-    // Media creator status (admin only)
-    if (req.body.creatorStatus !== undefined && req.user.role === 'SUPER_ADMIN' && user.mediaCreatorProfile) {
-      user.mediaCreatorProfile.creatorStatus = req.body.creatorStatus;
-    }
-
-    if (req.body.emergencyContactName || req.body.emergencyContactRelation || req.body.emergencyContactPhone) {
-      user.emergencyContact = {
-        name: req.body.emergencyContactName || user.emergencyContact?.name,
-        relationship: req.body.emergencyContactRelation || user.emergencyContact?.relationship,
-        phone: req.body.emergencyContactPhone || user.emergencyContact?.phone,
-      };
     }
 
     // Teacher profile
@@ -602,8 +584,28 @@ exports.updateProfile = async (req, res) => {
       if (req.body.registrationNumber !== undefined) user.doctorProfile.registrationNumber = req.body.registrationNumber;
     }
 
+    // Doctor verification updation
+    if (req.body.qualification !== undefined || req.body.college !== undefined || req.body.yearOfPassing !== undefined || req.body.medicalCouncilRegNumber !== undefined) {
+      user.doctorVerification = user.doctorVerification || {};
+      if (req.body.qualification !== undefined) user.doctorVerification.qualification = req.body.qualification;
+      if (req.body.college !== undefined) user.doctorVerification.college = req.body.college;
+      if (req.body.yearOfPassing !== undefined) user.doctorVerification.yearOfPassing = parseInt(req.body.yearOfPassing);
+      if (req.body.medicalCouncilRegNumber !== undefined) user.doctorVerification.medicalCouncilRegNumber = req.body.medicalCouncilRegNumber;
+    }
+    // Doctor verification file uploads
+    const degreeCert = await moveFile('degreeCertificate', 'degree');
+    if (degreeCert) {
+      user.doctorVerification = user.doctorVerification || {};
+      user.doctorVerification.degreeCertificate = degreeCert;
+    }
+    const regCert = await moveFile('registrationCertificate', 'regcert');
+    if (regCert) {
+      user.doctorVerification = user.doctorVerification || {};
+      user.doctorVerification.registrationCertificate = regCert;
+    }
+
     // Farmer profile
-    if (req.body.isContractFarmer !== undefined) {
+    if (req.body.isContractFarmer !== undefined || req.body.farmLocation !== undefined || req.body.irrigationType !== undefined) {
       user.farmerProfile = user.farmerProfile || {};
       if (req.body.isContractFarmer !== undefined) user.farmerProfile.isContractFarmer = req.body.isContractFarmer === 'true' || req.body.isContractFarmer === true;
       if (req.body.farmLocation !== undefined) user.farmerProfile.farmLocation = req.body.farmLocation;
@@ -635,7 +637,7 @@ exports.updateProfile = async (req, res) => {
       if (req.body.interests !== undefined) user.socialProfile.interests = req.body.interests;
     }
 
-    // Media creator profile
+    // Media creator
     if (req.body.isMediaCreator !== undefined) {
       const isCreator = req.body.isMediaCreator === 'true' || req.body.isMediaCreator === true;
       if (isCreator && !user.mediaCreatorProfile) {
@@ -647,12 +649,9 @@ exports.updateProfile = async (req, res) => {
           monetizationEarnings: 0,
           liveStreamingKey: Math.random().toString(36).substring(2, 15),
         };
-      } else if (!isCreator) {
+      } else if (!isCreator && user.mediaCreatorProfile) {
         user.mediaCreatorProfile = null;
       }
-    }
-    if (req.body.mediaBio !== undefined && user.mediaCreatorProfile) {
-      user.mediaCreatorProfile.bio = req.body.mediaBio;
     }
 
     // Seller profile
@@ -665,7 +664,7 @@ exports.updateProfile = async (req, res) => {
           gstNumber: req.body.gstNumber || '',
           rating: 0,
         };
-      } else if (!isSeller) {
+      } else if (!isSeller && user.sellerProfile) {
         user.sellerProfile = null;
       } else if (user.sellerProfile) {
         if (req.body.storeName) user.sellerProfile.storeName = req.body.storeName;
@@ -682,9 +681,16 @@ exports.updateProfile = async (req, res) => {
       }
     }
 
-    // Agent commission rate
-    if (req.body.commissionRate !== undefined && user.role === 'AGENT') {
-      user.commissionRate = parseFloat(req.body.commissionRate);
+    // QA / dev fields
+    if (req.body.twoFactorEnabled !== undefined) user.twoFactorEnabled = req.body.twoFactorEnabled === 'true' || req.body.twoFactorEnabled === true;
+    if (req.body.developedBy !== undefined) user.developedBy = req.body.developedBy;
+    if (req.body.testedBy !== undefined) user.testedBy = req.body.testedBy;
+    if (req.body.qaStatus !== undefined) user.qaStatus = req.body.qaStatus;
+
+    // AI tokens (admin only)
+    if (req.body.aiTokensRemaining !== undefined && req.user.role === 'SUPER_ADMIN') {
+      user.aiUsage = user.aiUsage || {};
+      user.aiUsage.aiTokensRemaining = parseInt(req.body.aiTokensRemaining);
     }
 
     user.updatedBy = req.user.id;
@@ -700,7 +706,7 @@ exports.updateProfile = async (req, res) => {
     if (req.files) {
       for (const field in req.files) {
         for (const file of req.files[field]) {
-          await fs.unlink(file.path).catch(() => { });
+          await fs.unlink(file.path).catch(() => {});
         }
       }
     }
@@ -720,7 +726,6 @@ exports.assignReporting = async (req, res) => {
     const { userId, reportsToId, sponsorId } = req.body;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
     if (reportsToId) {
       const superior = await User.findById(reportsToId);
       if (!superior) return res.status(404).json({ success: false, message: 'Superior not found' });
@@ -734,7 +739,6 @@ exports.assignReporting = async (req, res) => {
     }
     user.updatedBy = req.user.id;
     await user.save();
-
     res.json({ success: true, message: 'Hierarchy updated', user: { _id: user._id, reportsTo: user.reportsTo, sponsorId: user.sponsorId } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -749,15 +753,9 @@ exports.getSubordinates = async (req, res) => {
     const userId = req.params.id || req.user.id;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
     const subordinates = await User.find({ reportsTo: userId }).select('fullName email role');
     const mlmDownlines = await User.find({ sponsorId: userId }).select('fullName email role mlmLevel');
-
-    res.json({
-      success: true,
-      officialSubordinates: subordinates,
-      mlmDownlines: mlmDownlines,
-    });
+    res.json({ success: true, officialSubordinates: subordinates, mlmDownlines: mlmDownlines });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -772,25 +770,15 @@ exports.getAllUsers = async (req, res) => {
     const filter = {};
     if (role) filter.role = role;
     if (isVerified !== undefined) filter.isVerified = isVerified === 'true';
-    // By default exclude soft deleted users
-    if (includeDeleted !== 'true') {
-      filter.isDeleted = false;
-    }
+    if (includeDeleted !== 'true') filter.isDeleted = false;
 
     const users = await User.find(filter)
       .select('-password -otp -otpExpire')
       .limit(limit * 1)
       .skip((page - 1) * limit)
       .sort({ createdAt: -1 });
-
     const total = await User.countDocuments(filter);
-    res.json({
-      success: true,
-      users,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total,
-    });
+    res.json({ success: true, users, totalPages: Math.ceil(total / limit), currentPage: page, total });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -813,7 +801,7 @@ exports.getUserById = async (req, res) => {
 };
 
 // ======================
-// DELETE USER (Admin) - Soft delete by default
+// DELETE USER (Admin)
 // ======================
 exports.deleteUser = async (req, res) => {
   try {
@@ -822,15 +810,13 @@ exports.deleteUser = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     if (hardDelete === 'true') {
-      // Permanent delete
       if (user.profileImage) {
         const filePath = path.join(__dirname, '../', user.profileImage);
-        await fs.unlink(filePath).catch(() => { });
+        await fs.unlink(filePath).catch(() => {});
       }
       await User.findByIdAndDelete(req.params.id);
       res.json({ success: true, message: 'User permanently deleted' });
     } else {
-      // Soft delete
       user.isDeleted = true;
       user.deletedAt = new Date();
       user.isActive = false;
@@ -843,7 +829,7 @@ exports.deleteUser = async (req, res) => {
 };
 
 // ======================
-// RESTORE USER (Undelete)
+// RESTORE USER
 // ======================
 exports.restoreUser = async (req, res) => {
   try {
@@ -877,14 +863,13 @@ exports.updateAITokens = async (req, res) => {
 };
 
 // ======================
-// INCREMENT AI USAGE (Internal use)
+// INCREMENT AI USAGE
 // ======================
 exports.incrementAIUsage = async (req, res) => {
   try {
-    const { type } = req.body; // 'disease'
+    const { type } = req.body;
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
     user.aiUsage = user.aiUsage || {};
     if (type === 'disease') {
       user.aiUsage.diseaseDetectionCount = (user.aiUsage.diseaseDetectionCount || 0) + 1;
@@ -908,7 +893,6 @@ exports.addSubscriptionHistory = async (req, res) => {
     const { userId, plan, startDate, endDate, amountPaid, transactionId } = req.body;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
     user.subscriptionHistory.push({
       plan,
       startDate: new Date(startDate),
@@ -916,7 +900,6 @@ exports.addSubscriptionHistory = async (req, res) => {
       amountPaid,
       transactionId,
     });
-    // Also update activeSubscription if it's current
     user.activeSubscription = {
       plan,
       expiresAt: new Date(endDate),
@@ -937,7 +920,6 @@ exports.updateMLMPayout = async (req, res) => {
     const { userId, pendingCommission, totalWithdrawn, lastPayoutDate, nextPayoutDate } = req.body;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
     user.mlmPayoutInfo = user.mlmPayoutInfo || {};
     if (pendingCommission !== undefined) user.mlmPayoutInfo.pendingCommission = pendingCommission;
     if (totalWithdrawn !== undefined) user.mlmPayoutInfo.totalWithdrawn = totalWithdrawn;
@@ -961,7 +943,6 @@ exports.updateWallet = async (req, res) => {
     }
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
     if (operation === 'add') {
       user.walletBalance = (user.walletBalance || 0) + amount;
       user.totalEarnings = (user.totalEarnings || 0) + amount;
@@ -1010,7 +991,7 @@ exports.addHealthRecord = async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'Health record added', healthRecords: user.healthRecords });
   } catch (error) {
-    if (req.file) await fs.unlink(req.file.path).catch(() => { });
+    if (req.file) await fs.unlink(req.file.path).catch(() => {});
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -1049,7 +1030,7 @@ exports.addProductListing = async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'Product added', product: newProduct });
   } catch (error) {
-    if (req.file) await fs.unlink(req.file.path).catch(() => { });
+    if (req.file) await fs.unlink(req.file.path).catch(() => {});
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -1203,7 +1184,7 @@ exports.addStoreProduct = async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'Store product added', product });
   } catch (error) {
-    if (req.file) await fs.unlink(req.file.path).catch(() => { });
+    if (req.file) await fs.unlink(req.file.path).catch(() => {});
     res.status(500).json({ success: false, error: error.message });
   }
 };

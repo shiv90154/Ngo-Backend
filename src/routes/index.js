@@ -1,9 +1,9 @@
-// src/routes/index.js
 const express = require('express');
 const router = express.Router();
 
 const userRoutes = require('./auth.routes');
 const healthcareRoutes = require('./healthcare.routes');
+const medicineRoutes = require('./medicines.routes');        
 const mediaRoutes = require('./media.routes');
 const notificationRoutes = require('./notification.routes');
 const adminRoutes = require('./admin.routes');
@@ -13,8 +13,9 @@ const itRoutes = require('./it.routes');
 const agricultureRoutes = require('./agriculture.Routes');
 const financeRoutes = require('./finance.routes');
 const mlmRoutes = require('./mlm.routes');
-const subscriptionRoutes = require('./subscription.routes');   // 🆕 Subscription routes
-const adRoutes = require('./ad.routes');                         // 🆕 Ad routes
+const subscriptionRoutes = require('./subscription.routes');
+const adRoutes = require('./ad.routes');
+const donationRoutes = require('./donation.routes');
 
 const searchController = require('../controllers/search.controller');
 
@@ -26,6 +27,7 @@ router.get('/health', (req, res) => {
 // Mount routes
 router.use('/users', userRoutes);
 router.use('/healthcare', healthcareRoutes);
+router.use('/medicines', medicineRoutes);                     // 🆕 Mount medicine routes
 router.use('/media', mediaRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/admin', adminRoutes);
@@ -35,7 +37,9 @@ router.use('/it', itRoutes);
 router.use('/agriculture', agricultureRoutes);
 router.use('/finance', financeRoutes);
 router.use('/mlm', mlmRoutes);
-router.use('/subscription', subscriptionRoutes);          // 🆕 Mount subscription routes
-router.use('/ads', adRoutes);                             // 🆕 Mount ad routes
+router.use('/subscription', subscriptionRoutes);
+router.use('/ads', adRoutes);
+router.use('/donations', donationRoutes);
 router.get('/search', require('../controllers/search.controller').globalSearch);
+
 module.exports = router;
