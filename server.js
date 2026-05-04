@@ -9,6 +9,7 @@ const requiredEnv = ['JWT_SECRET', 'MONGO_URI'];
 const missingRequired = requiredEnv.filter(key => !process.env[key]);
 
 if (missingRequired.length) {
+  console.error(`❌ Missing environment variables: ${missingRequired.join(', ')}`);
   process.exit(1);
 }
 
@@ -18,13 +19,17 @@ const startServer = async () => {
   try {
     await connectDB();
 
-    serverInstance = app.listen(PORT);
+    serverInstance = app.listen(PORT, () => {
+      console.log(`✅ Server running on port ${PORT}`);
+    });
 
-    serverInstance.on('error', () => {
+    serverInstance.on('error', (err) => {
+      console.error('❌ Server error:', err.message);
       process.exit(1);
     });
 
   } catch (error) {
+    console.error('❌ Failed to start server:', error.message);
     process.exit(1);
   }
 };
@@ -36,7 +41,9 @@ const shutdown = async () => {
         if (typeof disconnectDB === 'function') {
           await disconnectDB();
         }
-      } catch (err) {}
+      } catch (err) {
+        console.error('Error during disconnect:', err);
+      }
       process.exit(0);
     });
 
@@ -51,11 +58,13 @@ const shutdown = async () => {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
-process.on('unhandledRejection', () => {
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection:', reason);
   process.exit(1);
 });
 
-process.on('uncaughtException', () => {
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
   process.exit(1);
 });
 
