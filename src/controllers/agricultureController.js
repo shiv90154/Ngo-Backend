@@ -5,7 +5,7 @@ const Cart = require('../models/Cart.model');
 const User = require('../models/user.model');
 const CustomerAddress = require("../models/CustomerAddresses");
 const axios = require('axios');
-require('dotenv').config();
+
 
 const PRIVILEGED_ROLES = [
     'SUPER_ADMIN',
