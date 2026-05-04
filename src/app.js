@@ -44,13 +44,15 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 /* ================= COMPRESSION ================= */
 app.use(compression());
 
-/* ================= STATIC ================= */
-const uploadsDir = path.join(__dirname, 'uploads');
+/* ================= STATIC (FIXED) ================= */
+// 👉 Move one level up from src → root/uploads
+const uploadsDir = path.join(__dirname, '../uploads');
 
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+// Serve files
 app.use('/uploads', express.static(uploadsDir));
 
 /* ================= HEALTH CHECK ================= */
