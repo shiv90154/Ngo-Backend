@@ -17,6 +17,7 @@ const subscriptionRoutes = require('./subscription.routes');
 const adRoutes = require('./ad.routes');
 const donationRoutes = require('./donation.routes');
 const clubRoutes = require('./club.routes');                 // ✅ fixed – proper import
+const dashboardRoutes = require('./dashboard.routes');
 
 const searchController = require('../controllers/search.controller');
 
@@ -42,6 +43,7 @@ router.use('/subscription', subscriptionRoutes);
 router.use('/ads', adRoutes);
 router.use('/donations', donationRoutes);
 router.use('/club', clubRoutes);                             // ✅ Club routes mounted
+router.use('/dashboard', dashboardRoutes);
 
 router.get('/search', require('../controllers/search.controller').globalSearch);
 

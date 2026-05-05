@@ -7,17 +7,14 @@ const Transaction = require('../models/Transaction.model');
 const Loan = require('../models/Loan.model');
 const BillPayment = require('../models/BillPayment.model');
 const AepsRequest = require('../models/AepsRequest.model');
-const { calculateCommission } = require('../services/commission.service');   // MLM
-const mailer = require('../utils/sendEmail'); // 🆕 email service
+const { calculateCommission } = require('../services/commission.service');  
+const mailer = require('../utils/sendEmail'); 
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-// ======================
-// WALLET (RAZORPAY)
-// ======================
 
 exports.createWalletOrder = async (req, res) => {
   try {

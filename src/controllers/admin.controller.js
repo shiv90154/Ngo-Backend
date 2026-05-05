@@ -316,13 +316,15 @@ exports.exportUsers = async (req, res) => {
 // GET all license types
 exports.getLicenseTypes = async (req, res) => {
   try {
-    const types = await LicenseType.find().sort('membershipFee');
+    const { category } = req.query;
+    const filter = { isActive: true };
+    if (category) filter.category = category;
+    const types = await LicenseType.find(filter).sort('membershipFee');
     res.json({ success: true, types });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
-
 // CREATE a license type
 exports.createLicenseType = async (req, res) => {
   try {

@@ -254,6 +254,13 @@ const userSchema = new mongoose.Schema(
       salaryEligible: { type: Boolean, default: false },
     },
 
+    // ========== CONTRACT STATUS (denormalized for fast access) ==========
+    contractStatus: {
+      type: String,
+      enum: ['draft', 'completed', 'rejected'],
+      default: 'draft',
+    },
+
     // ========== NEWS & MEDIA MODULE ==========
     mediaCreatorProfile: {
       isCreator: { type: Boolean, default: false },
@@ -376,6 +383,7 @@ userSchema.index({ adsSeen: 1 });
 userSchema.index({ adBlockedCreators: 1 });
 userSchema.index({ 'doctorVerification.verificationStatus': 1 });
 userSchema.index({ 'licenseStats.totalLicensesSold': 1 });
+userSchema.index({ contractStatus: 1 });   // 🆕 for fast contract checks
 
 // ========== STATIC METHOD: Generate Unique Referral Code ==========
 userSchema.statics.generateUniqueReferralCode = async function () {

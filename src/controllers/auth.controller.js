@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const { validationResult } = require('express-validator');
 
-// Complete roles list (matching model)
+// Complete roles list (matching the updated User model)
 const VALID_ROLES = [
   'SUPER_ADMIN',
   'ADDITIONAL_DIRECTOR',
@@ -26,7 +26,6 @@ const VALID_ROLES = [
   'NGO',
   'CLUB',
   'USER',
-  'ADMIN'
 ];
 
 const uploadDir = path.join(__dirname, '../uploads');
@@ -39,10 +38,7 @@ const uploadDir = path.join(__dirname, '../uploads');
 })();
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
-const hashOTP = async (otp) => {
-  const salt = await bcrypt.genSalt(10);
-  return bcrypt.hash(otp, salt);
-};
+const hashOTP = async (otp) => bcrypt.hash(otp, 10);
 const verifyOTP = async (plainOtp, hashedOtp) => bcrypt.compare(plainOtp, hashedOtp);
 
 const parseArray = (value) => {
@@ -119,6 +115,7 @@ exports.register = async (req, res) => {
     if (modules) {
       userModules = Array.isArray(modules) ? modules : [modules];
     } else {
+      // Auto-detect modules based on provided data
       if (finalAadhaar || finalPan || voterId || passportNumber) userModules.push('FINANCE');
       if (doctorSpecialization || registrationNumber || qualification || college) userModules.push('HEALTHCARE');
       if (farmLocation || irrigationType) userModules.push('AGRICULTURE');
@@ -168,6 +165,7 @@ exports.register = async (req, res) => {
         lastMonthReset: new Date(),
         salaryEligible: false,
       },
+      contractStatus: 'draft',                     // 🆕 new field
     };
 
     // Teacher profile
@@ -528,7 +526,7 @@ exports.getProfile = async (req, res) => {
 };
 
 // ======================
-// UPDATE PROFILE
+// UPDATE PROFILE (with new fields)
 // ======================
 exports.updateProfile = async (req, res) => {
   try {
@@ -552,7 +550,7 @@ exports.updateProfile = async (req, res) => {
       return url;
     };
 
-    // Move common files
+    // Common files
     await moveFile('profileImage', 'profile');
     await moveFile('profilePicture', 'profile');
     await moveFile('storeLogo', 'store_logo');
@@ -584,7 +582,7 @@ exports.updateProfile = async (req, res) => {
       if (req.body.registrationNumber !== undefined) user.doctorProfile.registrationNumber = req.body.registrationNumber;
     }
 
-    // Doctor verification updation
+    // Doctor verification
     if (req.body.qualification !== undefined || req.body.college !== undefined || req.body.yearOfPassing !== undefined || req.body.medicalCouncilRegNumber !== undefined) {
       user.doctorVerification = user.doctorVerification || {};
       if (req.body.qualification !== undefined) user.doctorVerification.qualification = req.body.qualification;
@@ -592,7 +590,6 @@ exports.updateProfile = async (req, res) => {
       if (req.body.yearOfPassing !== undefined) user.doctorVerification.yearOfPassing = parseInt(req.body.yearOfPassing);
       if (req.body.medicalCouncilRegNumber !== undefined) user.doctorVerification.medicalCouncilRegNumber = req.body.medicalCouncilRegNumber;
     }
-    // Doctor verification file uploads
     const degreeCert = await moveFile('degreeCertificate', 'degree');
     if (degreeCert) {
       user.doctorVerification = user.doctorVerification || {};
