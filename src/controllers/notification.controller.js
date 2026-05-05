@@ -4,8 +4,15 @@ const User = require('../models/user.model');
 const Appointment = require('../models/Appointment');
 const Enrollment = require('../models/Enrollment');
 const Course = require('../models/Course');
-const Test = require('../models/Test');       // added for test results
+const Test = require('../models/Test');
 const TestAttempt = require('../models/TestAttempt');
+const LicensePurchase = require('../models/LicensePurchase');
+const Meeting = require('../models/Meeting');
+const WeeklyContribution = require('../models/WeeklyContribution');
+const EducationProgram = require('../models/EducationProgram');
+const ServiceRequest = require('../models/ServiceRequest');
+const MedicineOrder = require('../models/MedicineOrder');
+const CommissionLog = require('../models/CommissionLog');
 
 // ======================
 // CRUD FOR CURRENT USER
@@ -100,7 +107,6 @@ const safeCreate = async (data) => {
 // ROLE‑BASED PERSONAL MESSAGES
 // ======================
 
-// Doctor sends message to patient (must have past appointment)
 exports.sendDoctorNotification = async (req, res) => {
   try {
     const { recipientId, title, message } = req.body;
@@ -128,7 +134,6 @@ exports.sendDoctorNotification = async (req, res) => {
   }
 };
 
-// Teacher sends message to student (must be enrolled in teacher's course)
 exports.sendTeacherNotification = async (req, res) => {
   try {
     const { recipientId, title, message } = req.body;
@@ -157,7 +162,6 @@ exports.sendTeacherNotification = async (req, res) => {
   }
 };
 
-// Agent sends message to client (relationship check can be added later)
 exports.sendAgentNotification = async (req, res) => {
   try {
     const { recipientId, title, message } = req.body;
@@ -169,11 +173,7 @@ exports.sendAgentNotification = async (req, res) => {
     const recipient = await User.findById(recipientId);
     if (!recipient) return res.status(404).json({ success: false, message: 'Recipient not found' });
 
-    // Optional: check agent-client relationship (if you have Client model)
-    // const Client = require('../models/Client');
-    // const isClient = await Client.exists({ createdBy: senderId, _id: recipientId });
-    // if (!isClient) return res.status(403).json({ success: false, message: 'Not your client' });
-
+    // Optional: client relationship check can be added here
     await safeCreate({
       recipient: recipientId,
       sender: senderId,
@@ -188,9 +188,10 @@ exports.sendAgentNotification = async (req, res) => {
 };
 
 // ======================
-// SYSTEM‑GENERATED NOTIFICATIONS (called from other controllers)
+// SYSTEM‑GENERATED NOTIFICATIONS
 // ======================
 
+// ---------- HEALTHCARE ----------
 exports.notifyAppointmentReminder = async (appointmentId) => {
   try {
     const apt = await Appointment.findById(appointmentId).populate('patientId doctorId');
@@ -227,6 +228,165 @@ exports.notifyPrescriptionAdded = async (prescription) => {
   }
 };
 
+// 🆕 Doctor verification approved/rejected
+exports.notifyDoctorVerification = async (doctorId, status, reason) => {
+  try {
+    const doctor = await User.findById(doctorId);
+    if (!doctor) return;
+    const title = status === 'approved' ? 'Doctor Profile Approved' : 'Doctor Profile Rejected';
+    const message = status === 'approved'
+      ? 'Congratulations! Your doctor profile has been verified. You can now start accepting appointments.'
+      : `Your verification request was rejected. Reason: ${reason || 'No reason provided'}. Please update your documents.`;
+    await safeCreate({
+      recipient: doctorId,
+      sender: null,
+      type: 'doctor_verification',
+      metadata: { title, message, verificationStatus: status },
+    });
+  } catch (err) {
+    console.error('Doctor verification notification error:', err);
+  }
+};
+
+// ---------- PHARMACY ----------
+exports.notifyMedicineOrderStatus = async (orderId, newStatus) => {
+  try {
+    const order = await MedicineOrder.findById(orderId).populate('user');
+    if (!order) return;
+    const statusMessages = {
+      confirmed: 'Your medicine order has been confirmed and is being processed.',
+      shipped: 'Your medicine order has been shipped. You will receive it soon.',
+      delivered: 'Your medicine order has been delivered.',
+      cancelled: 'Your medicine order has been cancelled.',
+    };
+    const message = statusMessages[newStatus] || `Your order status is now ${newStatus}.`;
+    await safeCreate({
+      recipient: order.user._id,
+      sender: null,
+      type: 'medicine_order',
+      metadata: {
+        title: 'Medicine Order Update',
+        message,
+        orderId: order._id,
+        status: newStatus,
+      },
+    });
+  } catch (err) {
+    console.error('Medicine order status notification error:', err);
+  }
+};
+
+// ---------- LICENSES ----------
+exports.notifyLicensePurchase = async (purchaseId) => {
+  try {
+    const purchase = await LicensePurchase.findById(purchaseId)
+      .populate('soldBy', 'fullName email')
+      .populate('licenseType', 'name incentiveAmount');
+    if (!purchase) return;
+    // Notify the seller
+    await safeCreate({
+      recipient: purchase.soldBy._id,
+      sender: null,
+      type: 'license_sold',
+      metadata: {
+        title: 'License Sold!',
+        message: `You sold a ${purchase.licenseType.name} license. Incentive: ₹${purchase.licenseType.incentiveAmount}.`,
+        purchaseId: purchase._id,
+      },
+    });
+  } catch (err) {
+    console.error('License purchase notification error:', err);
+  }
+};
+
+exports.notifyCommissionCredited = async (commissionLog) => {
+  try {
+    if (!commissionLog.userId) return;
+    await safeCreate({
+      recipient: commissionLog.userId,
+      sender: null,
+      type: 'mlm_commission',
+      metadata: {
+        title: 'Commission Credited',
+        message: `You have received ₹${commissionLog.amount} as commission.`,
+        amount: commissionLog.amount,
+        commissionLogId: commissionLog._id,
+      },
+    });
+  } catch (err) {
+    console.error('Commission notification error:', err);
+  }
+};
+
+// ---------- MEETINGS ----------
+exports.notifyMeetingCreated = async (meetingId) => {
+  try {
+    const meeting = await Meeting.findById(meetingId).populate('host participants');
+    if (!meeting) return;
+    // Notify each participant (except host)
+    for (const participant of meeting.participants) {
+      if (participant._id.toString() === meeting.host._id.toString()) continue;
+      await safeCreate({
+        recipient: participant._id,
+        sender: meeting.host._id,
+        type: 'meeting_invite',
+        metadata: {
+          title: 'Meeting Invitation',
+          message: `You have been invited to "${meeting.title}" on ${new Date(meeting.startTime).toLocaleString()}.`,
+          meetingId: meeting._id,
+          meetingLink: meeting.meetingLink,
+        },
+      });
+    }
+  } catch (err) {
+    console.error('Meeting notification error:', err);
+  }
+};
+
+exports.notifyMeetingReminder = async (meetingId) => {
+  try {
+    const meeting = await Meeting.findById(meetingId).populate('host participants');
+    if (!meeting) return;
+    const all = [meeting.host._id, ...meeting.participants.map(p => p._id)];
+    const unique = [...new Set(all.map(id => id.toString()))];
+    for (const userId of unique) {
+      await safeCreate({
+        recipient: userId,
+        sender: null,
+        type: 'meeting_reminder',
+        metadata: {
+          title: 'Meeting Reminder',
+          message: `"${meeting.title}" starts at ${new Date(meeting.startTime).toLocaleTimeString()}.`,
+          meetingId: meeting._id,
+        },
+      });
+    }
+  } catch (err) {
+    console.error('Meeting reminder error:', err);
+  }
+};
+
+// ---------- WEEKLY CONTRIBUTIONS ----------
+exports.notifyContributionRecorded = async (contributionId) => {
+  try {
+    const contribution = await WeeklyContribution.findById(contributionId).populate('gramVikasAdhikari');
+    if (!contribution) return;
+    await safeCreate({
+      recipient: contribution.gramVikasAdhikari._id,
+      sender: null,
+      type: 'contribution_recorded',
+      metadata: {
+        title: 'Contribution Recorded',
+        message: `Your weekly contribution of ₹${contribution.amount} for ${contribution.purpose} has been recorded.`,
+        contributionId: contribution._id,
+      },
+    });
+  } catch (err) {
+    console.error('Contribution notification error:', err);
+  }
+};
+
+// ---------- EDUCATION ----------
 exports.notifyCourseEnrolled = async (enrollment) => {
   try {
     const course = await Course.findById(enrollment.course).populate('instructor');
@@ -238,6 +398,17 @@ exports.notifyCourseEnrolled = async (enrollment) => {
       metadata: {
         title: 'New Enrollment',
         message: `${student.fullName} enrolled in your course "${course.title}"`,
+        courseId: course._id,
+      },
+    });
+    // Also notify the student
+    await safeCreate({
+      recipient: enrollment.student,
+      sender: null,
+      type: 'course_enrolled',
+      metadata: {
+        title: 'Enrollment Confirmed',
+        message: `You have successfully enrolled in "${course.title}".`,
         courseId: course._id,
       },
     });
@@ -261,7 +432,6 @@ exports.notifyTestResult = async (attemptId) => {
         testId: test._id,
       },
     });
-    // Also notify the instructor
     const course = await Course.findById(test.course);
     if (course?.instructor) {
       const student = await User.findById(attempt.student);
@@ -281,7 +451,55 @@ exports.notifyTestResult = async (attemptId) => {
   }
 };
 
-// Optional: more system notifications (wallet, loan, etc.)
+// 🆕 Education program enrollment (Class 6‑12)
+exports.notifyEducationProgramEnrolled = async (enrollment) => {
+  try {
+    const student = await User.findById(enrollment.student);
+    const program = await EducationProgram.findById(enrollment.program);
+    if (!student || !program) return;
+    await safeCreate({
+      recipient: enrollment.soldBy, // Gram Vikas Adhikari who enrolled the student
+      sender: null,
+      type: 'education_program_sold',
+      metadata: {
+        title: 'Student Enrolled',
+        message: `You enrolled ${student.fullName} in Class ${program.class} program. Incentive: ₹${program.incentive}.`,
+      },
+    });
+  } catch (err) {
+    console.error('Education program notification error:', err);
+  }
+};
+
+// ---------- SERVICE REQUESTS ----------
+exports.notifyServiceRequestUpdate = async (requestId) => {
+  try {
+    const request = await ServiceRequest.findById(requestId).populate('user');
+    if (!request) return;
+    const statusMessages = {
+      in_review: 'Your service request is being reviewed by an admin.',
+      approved: 'Your service request has been approved.',
+      rejected: 'Your service request was rejected.',
+      completed: 'Your service request has been marked as completed.',
+    };
+    const message = statusMessages[request.status] || `Your request status is now ${request.status}.`;
+    await safeCreate({
+      recipient: request.user._id,
+      sender: null,
+      type: 'service_request',
+      metadata: {
+        title: 'Service Request Update',
+        message,
+        requestId: request._id,
+        status: request.status,
+      },
+    });
+  } catch (err) {
+    console.error('Service request notification error:', err);
+  }
+};
+
+// ---------- FINANCE ----------
 exports.notifyWalletCredited = async (userId, amount, description) => {
   try {
     await safeCreate({
@@ -301,7 +519,6 @@ exports.notifyWalletCredited = async (userId, amount, description) => {
 
 exports.notifyLoanSanctioned = async (loan) => {
   try {
-    const user = await User.findById(loan.user);
     await safeCreate({
       recipient: loan.user,
       sender: null,
@@ -319,7 +536,8 @@ exports.notifyLoanSanctioned = async (loan) => {
 
 exports.notifyEMIReminder = async (loanId) => {
   try {
-    const loan = await require('../models/Loan.model').findById(loanId);
+    const Loan = require('../models/Loan.model');
+    const loan = await Loan.findById(loanId);
     if (!loan || loan.status !== 'active') return;
     await safeCreate({
       recipient: loan.user,
@@ -352,6 +570,7 @@ exports.notifyBillPaid = async (billPayment) => {
   }
 };
 
+// ---------- SUBSCRIPTION ----------
 exports.notifySubscriptionExpiry = async (userId, plan, daysLeft) => {
   try {
     await safeCreate({
@@ -368,7 +587,42 @@ exports.notifySubscriptionExpiry = async (userId, plan, daysLeft) => {
   }
 };
 
-// Admin sends a global notification to all active users
+// ---------- MLM & EARNINGS ----------
+exports.notifyMLMCommission = async (userId, amount) => {
+  try {
+    await safeCreate({
+      recipient: userId,
+      sender: null,
+      type: 'mlm_commission',
+      metadata: {
+        title: 'MLM Commission Credited',
+        message: `You have received ₹${amount} as MLM commission.`,
+        amount,
+      },
+    });
+  } catch (err) {
+    console.error('MLM commission notification error:', err);
+  }
+};
+
+// ---------- E‑COMMERCE / STORE ----------
+exports.notifyStoreOrder = async (sellerId, orderDetails) => {
+  try {
+    await safeCreate({
+      recipient: sellerId,
+      sender: null,
+      type: 'store_order',
+      metadata: {
+        title: 'New Store Order',
+        message: `You received a new order: ${orderDetails}.`,
+      },
+    });
+  } catch (err) {
+    console.error('Store order notification error:', err);
+  }
+};
+
+// ---------- GLOBAL NOTIFICATIONS ----------
 exports.sendGlobalNotification = async (req, res) => {
   try {
     const { title, message } = req.body;
@@ -391,37 +645,5 @@ exports.sendGlobalNotification = async (req, res) => {
     res.json({ success: true, message: `Global notification sent to ${notifications.length} users` });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
-  }
-};
-exports.notifyMLMCommission = async (userId, amount) => {
-  try {
-    await safeCreate({
-      recipient: userId,
-      sender: null,
-      type: 'mlm_commission',
-      metadata: {
-        title: 'Commission Credited',
-        message: `You have received ₹${amount} as MLM commission.`,
-        amount,
-      },
-    });
-  } catch (err) {
-    console.error('MLM commission notification error:', err);
-  }
-};
-
-exports.notifyStoreOrder = async (sellerId, orderDetails) => {
-  try {
-    await safeCreate({
-      recipient: sellerId,
-      sender: null,
-      type: 'store_order',
-      metadata: {
-        title: 'New Store Order',
-        message: `You received a new order: ${orderDetails}.`,
-      },
-    });
-  } catch (err) {
-    console.error('Store order notification error:', err);
   }
 };

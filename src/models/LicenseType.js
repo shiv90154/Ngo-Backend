@@ -1,11 +1,35 @@
 const mongoose = require('mongoose');
+
 const licenseTypeSchema = new mongoose.Schema({
-  name: { type: String, required: true },           // "Kishori Care License"
-  code: { type: String, unique: true },             // "KCL"
-  membershipFee: { type: Number, required: true },   // ₹200
-  incentiveAmount: { type: Number, required: true }, // ₹50
-  description: String,
-  isActive: { type: Boolean, default: true }
+  name: {
+    type: String,
+    required: [true, 'License type name is required'],
+    trim: true
+  },
+  code: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true
+  },
+  membershipFee: {
+    type: Number,
+    required: [true, 'Membership fee is required'],
+    min: [0, 'Fee cannot be negative']
+  },
+  incentiveAmount: {
+    type: Number,
+    required: [true, 'Incentive amount is required'],
+    min: [0, 'Incentive cannot be negative']
+  },
+  description: {
+    type: String,
+    trim: true
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  }
 }, { timestamps: true });
 
 module.exports = mongoose.model('LicenseType', licenseTypeSchema);

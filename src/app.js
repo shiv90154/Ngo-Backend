@@ -63,10 +63,9 @@ app.get('/', (req, res) => {
   });
 });
 
-// Mount routes
+
 app.use('/api', routes);
 
-// Error handlers
 app.use(notFound);
 app.use(errorHandler);
 

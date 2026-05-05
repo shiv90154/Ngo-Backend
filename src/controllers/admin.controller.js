@@ -9,6 +9,14 @@ const Enrollment = require('../models/Enrollment');
 const Course = require('../models/Course');
 const Notification = require('../models/Notification');
 
+// 🆕 New imports for extended admin features
+const LicenseType = require('../models/LicenseType');
+const LicensePurchase = require('../models/LicensePurchase');
+const CommissionSplit = require('../models/CommissionSplit');
+const EducationProgram = require('../models/EducationProgram');
+const Meeting = require('../models/Meeting');
+const WeeklyContribution = require('../models/WeeklyContribution');
+
 // ---------- DASHBOARD STATS ----------
 exports.getStats = async (req, res) => {
   try {
@@ -39,48 +47,32 @@ exports.getStats = async (req, res) => {
 
 // ---------- USER MANAGEMENT ----------
 
-// 🆕 Admin creates a user directly (no OTP)
 exports.createUser = async (req, res) => {
   try {
     const { fullName, email, phone, password, role, modules, state, district, block, village, isActive } = req.body;
-
-    // Basic validation
     if (!fullName || !email || !phone || !password) {
       return res.status(400).json({ success: false, message: 'Full name, email, phone, and password are required' });
     }
-
     if (!/^\d{10}$/.test(phone)) {
       return res.status(400).json({ success: false, message: 'Phone must be 10 digits' });
     }
-
-    // Check uniqueness
     const existing = await User.findOne({ $or: [{ email }, { phone }] });
     if (existing) {
       return res.status(400).json({ success: false, message: 'User with this email or phone already exists' });
     }
-
     const user = await User.create({
-      fullName,
-      email,
-      phone,
-      password,               // pre‑save hook will hash it
+      fullName, email, phone, password,
       role: role || 'USER',
       modules: modules || [],
-      state,
-      district,
-      block,
-      village,
+      state, district, block, village,
       isActive: isActive !== undefined ? isActive : true,
-      isVerified: true,       // admin‑created accounts are pre‑verified
+      isVerified: true,
       createdBy: req.user.id,
     });
-
-    // Remove sensitive fields before returning
     const userData = user.toObject();
     delete userData.password;
     delete userData.otp;
     delete userData.otpExpire;
-
     res.status(201).json({ success: true, user: userData });
   } catch (error) {
     console.error('Admin create user error:', error);
@@ -99,7 +91,6 @@ exports.getUsers = async (req, res) => {
     if (role) query.role = role;
     if (hierarchyLevel) query.hierarchyLevel = parseInt(hierarchyLevel);
     if (search) query.$or = [{ fullName: { $regex: search, $options: 'i' } }, { email: { $regex: search, $options: 'i' } }];
-
     const users = await User.find(query).select('-password -otp -otpExpire')
       .populate('reportsTo', 'fullName email role')
       .sort({ hierarchyLevel: 1, createdAt: -1 })
@@ -294,7 +285,7 @@ exports.sendGlobalNotification = async (req, res) => {
   }
 };
 
-// ---------- EXPORT USERS (CSV) – no external lib ----------
+// ---------- EXPORT USERS (CSV) ----------
 exports.exportUsers = async (req, res) => {
   try {
     const users = await User.find({ isDeleted: false }).select('-password -otp');
@@ -313,6 +304,207 @@ exports.exportUsers = async (req, res) => {
     res.header('Content-Type', 'text/csv');
     res.attachment('users.csv');
     res.send(csv);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// 🆕 LICENSE TYPE MANAGEMENT
+// ======================
+
+// GET all license types
+exports.getLicenseTypes = async (req, res) => {
+  try {
+    const types = await LicenseType.find().sort('membershipFee');
+    res.json({ success: true, types });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// CREATE a license type
+exports.createLicenseType = async (req, res) => {
+  try {
+    const { name, code, membershipFee, incentiveAmount, description } = req.body;
+    if (!name || membershipFee === undefined || incentiveAmount === undefined) {
+      return res.status(400).json({ success: false, message: 'Name, membershipFee, and incentiveAmount are required' });
+    }
+    const duplicate = await LicenseType.findOne({ $or: [{ name }, { code }] });
+    if (duplicate) {
+      return res.status(400).json({ success: false, message: 'License type with that name or code already exists' });
+    }
+    const type = await LicenseType.create({ name, code, membershipFee, incentiveAmount, description });
+    res.status(201).json({ success: true, type });
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ success: false, message: messages.join(', ') });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// UPDATE a license type
+exports.updateLicenseType = async (req, res) => {
+  try {
+    const { name, code, membershipFee, incentiveAmount, description } = req.body;
+    const type = await LicenseType.findById(req.params.id);
+    if (!type) return res.status(404).json({ success: false, message: 'License type not found' });
+    if (name !== undefined) type.name = name;
+    if (code !== undefined) type.code = code;
+    if (membershipFee !== undefined) type.membershipFee = membershipFee;
+    if (incentiveAmount !== undefined) type.incentiveAmount = incentiveAmount;
+    if (description !== undefined) type.description = description;
+    await type.save();
+    res.json({ success: true, type });
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ success: false, message: messages.join(', ') });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// DELETE a license type
+exports.deleteLicenseType = async (req, res) => {
+  try {
+    const type = await LicenseType.findByIdAndDelete(req.params.id);
+    if (!type) return res.status(404).json({ success: false, message: 'License type not found' });
+    res.json({ success: true, message: 'License type deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// 🆕 LICENSE PURCHASES (ALL)
+// ======================
+exports.getAllLicensePurchases = async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+    const purchases = await LicensePurchase.find()
+      .sort('-purchaseDate')
+      .populate('licenseType', 'name incentiveAmount')
+      .populate('soldBy', 'fullName email')
+      .populate('customer', 'fullName email')
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+    const total = await LicensePurchase.countDocuments();
+    res.json({ success: true, purchases, totalPages: Math.ceil(total / limit), currentPage: page, total });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// 🆕 COMMISSION SPLITS
+// ======================
+exports.getCommissionSplits = async (req, res) => {
+  try {
+    const splits = await CommissionSplit.find().sort('levelOffset');
+    res.json({ success: true, splits });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+exports.updateCommissionSplit = async (req, res) => {
+  try {
+    const { percentage } = req.body;
+    if (percentage === undefined) {
+      return res.status(400).json({ success: false, message: 'Percentage is required' });
+    }
+    const split = await CommissionSplit.findByIdAndUpdate(
+      req.params.id,
+      { percentage },
+      { new: true }
+    );
+    if (!split) return res.status(404).json({ success: false, message: 'Commission split not found' });
+    res.json({ success: true, split });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// 🆕 EDUCATION PROGRAMS
+// ======================
+exports.getEducationPrograms = async (req, res) => {
+  try {
+    const programs = await EducationProgram.find().sort('class');
+    res.json({ success: true, programs });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+exports.updateEducationProgram = async (req, res) => {
+  try {
+    const { fee, incentive } = req.body;
+    const program = await EducationProgram.findById(req.params.id);
+    if (!program) return res.status(404).json({ success: false, message: 'Program not found' });
+    if (fee !== undefined) program.fee = fee;
+    if (incentive !== undefined) program.incentive = incentive;
+    await program.save();
+    res.json({ success: true, program });
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ success: false, message: messages.join(', ') });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// 🆕 MEETINGS
+// ======================
+exports.getAllMeetings = async (req, res) => {
+  try {
+    const { page = 1, limit = 50 } = req.query;
+    const meetings = await Meeting.find()
+      .sort('-startTime')
+      .populate('host', 'fullName email')
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+    const total = await Meeting.countDocuments();
+    res.json({ success: true, meetings, totalPages: Math.ceil(total / limit), currentPage: page, total });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+exports.updateMeetingStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!status) return res.status(400).json({ success: false, message: 'Status is required' });
+    const meeting = await Meeting.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true }
+    );
+    if (!meeting) return res.status(404).json({ success: false, message: 'Meeting not found' });
+    res.json({ success: true, meeting });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ======================
+// 🆕 WEEKLY CONTRIBUTIONS
+// ======================
+exports.getAllContributions = async (req, res) => {
+  try {
+    const { page = 1, limit = 50 } = req.query;
+    const contributions = await WeeklyContribution.find()
+      .sort('-date')
+      .populate('gramVikasAdhikari', 'fullName email')
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+    const total = await WeeklyContribution.countDocuments();
+    res.json({ success: true, contributions, totalPages: Math.ceil(total / limit), currentPage: page, total });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

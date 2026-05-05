@@ -16,14 +16,14 @@ router.patch('/read-all', notificationController.markAllAsRead);
 router.delete('/:id', notificationController.deleteNotification);
 
 // ======================
-// ROLE-BASED PERSONAL MESSAGES
+// ROLE‑BASED PERSONAL MESSAGES
 // ======================
 router.post('/doctor/send', restrictTo('DOCTOR'), notificationController.sendDoctorNotification);
 router.post('/teacher/send', restrictTo('TEACHER'), notificationController.sendTeacherNotification);
 router.post('/agent/send', restrictTo('AGENT'), notificationController.sendAgentNotification);
 
 // ======================
-// ADMIN MASS NOTIFICATION (global)
+// ADMIN GLOBAL NOTIFICATION
 // ======================
 router.post(
   '/admin/send-global',
