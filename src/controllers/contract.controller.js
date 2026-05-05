@@ -22,15 +22,12 @@ exports.getMyContract = async (req, res) => {
   try {
     let contract = await Contract.findOne({ user: req.user.id }).populate('user', 'fullName role');
     if (!contract) {
-      // Initialize a draft contract with user's existing data
       const user = await User.findById(req.user.id);
       if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
-      // Determine default amounts based on role (example – adjust as needed)
       const feeMap = {
         STATE_OFFICER: 10000,
         DISTRICT_MANAGER: 5000,
-        // … add all roles
         DEFAULT: 0,
       };
       const depositMap = {
@@ -72,13 +69,15 @@ exports.updateMyContract = async (req, res) => {
     let contract = await Contract.findOne({ user: req.user.id });
     if (!contract) return res.status(404).json({ success: false, message: 'Contract not found' });
 
-    // Update personal info fields
-    const simpleFields = ['fullName','fatherName','dob','address','phone','email','aadhaarNumber','panNumber','qualification','currentWork','state','district','block','gramPanchayat'];
+    const simpleFields = [
+      'fullName','fatherName','dob','address','phone','email',
+      'aadhaarNumber','panNumber','qualification','currentWork',
+      'state','district','block','gramPanchayat'
+    ];
     simpleFields.forEach(f => {
       if (req.body[f] !== undefined) contract[f] = req.body[f];
     });
 
-    // Process file uploads for receipts
     if (req.files) {
       const moveFile = (fieldName, targetField) => {
         if (req.files[fieldName]) {
@@ -89,7 +88,6 @@ exports.updateMyContract = async (req, res) => {
       moveFile('processingFeeReceipt', 'processingFee.receiptUrl');
       moveFile('donationReceipt', 'donation.receiptUrl');
       moveFile('securityDepositReceipt', 'securityDeposit.receiptUrl');
-      // Signature upload
       if (req.files.signature) {
         const sigFile = req.files.signature[0];
         contract.signature = `/uploads/contract-receipts/${sigFile.filename}`;
@@ -97,7 +95,6 @@ exports.updateMyContract = async (req, res) => {
       }
     }
 
-    // Update payment info
     if (req.body.processingFee) {
       const pf = JSON.parse(req.body.processingFee);
       contract.processingFee = { ...contract.processingFee, ...pf };
@@ -111,19 +108,16 @@ exports.updateMyContract = async (req, res) => {
       contract.securityDeposit = { ...contract.securityDeposit, ...sd };
     }
 
-    // Terms acceptance
     if (req.body.termsAccepted === 'true') {
       contract.termsAccepted = true;
       contract.termsAcceptedAt = new Date();
     }
 
-    // Digital signature via base64 string
     if (req.body.signatureBase64) {
       contract.signature = req.body.signatureBase64;
       contract.signedAt = new Date();
     }
 
-    // If all required steps are done, mark as completed
     const pf = contract.processingFee;
     const sd = contract.securityDeposit;
     if (pf.paid && sd.paid && contract.termsAccepted && contract.signature) {
@@ -166,11 +160,25 @@ exports.reviewContract = async (req, res) => {
     const { adminStatus, adminNotes } = req.body;
     const contract = await Contract.findById(req.params.id);
     if (!contract) return res.status(404).json({ success: false, message: 'Contract not found' });
+
     contract.adminStatus = adminStatus || contract.adminStatus;
     if (adminNotes) contract.adminNotes = adminNotes;
     contract.reviewedBy = req.user.id;
     contract.reviewedAt = new Date();
-    if (adminStatus === 'rejected') contract.status = 'rejected';
+
+    // 🆕 Sync user's contractStatus for instant dashboard access
+    const user = await User.findById(contract.user);
+    if (user) {
+      if (adminStatus === 'approved') {
+        contract.status = 'completed';
+        user.contractStatus = 'completed';
+      } else if (adminStatus === 'rejected') {
+        contract.status = 'rejected';
+        user.contractStatus = 'rejected';
+      }
+      await user.save();
+    }
+
     await contract.save();
     res.json({ success: true, contract });
   } catch (error) {
