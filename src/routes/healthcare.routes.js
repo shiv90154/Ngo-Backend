@@ -42,7 +42,6 @@ router.delete('/records/:id', protect, healthcareController.deleteHealthRecord);
 // DOCTOR SEARCH
 // ======================
 router.get('/doctors/search', protect, healthcareController.searchDoctors);
-router.get("/doctor/dashboard", protect, healthcareController.getDoctorDashboard);
 
 // ======================
 // DOCTOR DASHBOARD & PATIENTS (NEW)

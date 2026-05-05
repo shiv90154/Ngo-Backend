@@ -73,4 +73,5 @@ router.post('/become-creator', protect, mediaController.becomeCreator);
 router.post('/ads/track-click', protect, mediaController.trackAdClick);
 // router.post('/ads/track-impression', protect, mediaController.trackAdImpression);
 
+
 module.exports = router;

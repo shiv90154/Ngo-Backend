@@ -2,13 +2,12 @@ const Appointment = require('../models/Appointment');
 const Prescription = require('../models/Prescription');
 const HealthRecord = require('../models/HealthRecord');
 const DoctorAvailability = require('../models/DoctorAvailability');
-const mongoose = require('mongoose');
 const User = require('../models/user.model');
 const Medicine = require('../models/Medicine');            // 🆕 for prescription-to-order
 const path = require('path');
 const fs = require('fs').promises;
 const mailer = require('../utils/sendEmail');
-
+const mongoose = require('mongoose')
 const uploadDir = path.join(__dirname, '../uploads/healthcare');
 (async () => {
   await fs.mkdir(uploadDir, { recursive: true });
@@ -90,7 +89,7 @@ exports.getAvailableSlots = async (req, res) => {
     }
 
     // Find time slot configuration for this day
-    const daySlot = availability.timeSlots.find(s => s.day?.toLowerCase() === dayOfWeek);
+    const daySlot = availability.timeSlots.find(s => s.day === dayOfWeek);
     if (!daySlot) {
       return res.json({ success: true, slots: [] });
     }
@@ -167,7 +166,7 @@ exports.bookAppointment = async (req, res) => {
     // Check doctor availability
     const availability = await DoctorAvailability.findOne({ doctorId });
     if (!availability || !availability.isAcceptingAppointments) {
-      return res.status(409).json({ success: false, message: 'Doctor not accepting appointments' });
+      return res.status(400).json({ success: false, message: 'Doctor not accepting appointments' });
     }
 
     // Validate consultation mode
@@ -288,34 +287,26 @@ exports.getPatientAppointments = async (req, res) => {
     const { status, page = 1, limit = 10 } = req.query;
 
     const filter = { patientId };
-
-    if (status) {
-      filter.status = status;
-    }
+    if (status) filter.status = status;
 
     const appointments = await Appointment.find(filter)
-      .populate("doctorId", "fullName email doctorProfile  profileImage")
-      .populate("patientId", "fullName email phone profileImage")
+      .populate('doctorId', 'fullName email doctorProfile profileImage')
+      .populate('prescriptionId')
       .sort({ appointmentDate: -1 })
-      .limit(Number(limit))
-      .skip((Number(page) - 1) * Number(limit));
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
 
     const total = await Appointment.countDocuments(filter);
 
     res.json({
       success: true,
       appointments,
-      totalPages: Math.ceil(total / Number(limit)),
-      currentPage: Number(page),
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
       total,
     });
   } catch (error) {
-    console.error("Get patient appointments error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch appointments",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
@@ -361,6 +352,7 @@ exports.getAppointmentById = async (req, res) => {
     const appointment = await Appointment.findById(req.params.id)
       .populate('patientId', 'fullName email phone profileImage')
       .populate('doctorId', 'fullName email doctorProfile profileImage')
+      .populate('prescriptionId');
 
     if (!appointment) {
       return res.status(404).json({ success: false, message: 'Appointment not found' });
@@ -448,85 +440,6 @@ exports.createPrescription = async (req, res) => {
   }
 };
 
-// Search Doctor's Patients
-exports.searchDoctorPatients = async (req, res) => {
-  try {
-    const doctorId = req.user.id;
-    const { search = "", page = 1, limit = 10 } = req.query;
-
-    if (req.user.role !== "DOCTOR") {
-      return res.status(403).json({
-        success: false,
-        message: "Only doctors can search patients",
-      });
-    }
-
-    const pageNumber = Math.max(Number(page) || 1, 1);
-    const limitNumber = Math.max(Number(limit) || 10, 1);
-
-    const appointments = await Appointment.find({ doctorId })
-      .populate("patientId", "fullName email phone profileImage gender dob")
-      .sort({ appointmentDate: -1 });
-
-    let patients = appointments
-      .filter((apt) => apt.patientId)
-      .map((apt) => ({
-        _id: apt.patientId._id,
-        fullName: apt.patientId.fullName,
-        email: apt.patientId.email,
-        phone: apt.patientId.phone,
-        profileImage: apt.patientId.profileImage,
-        gender: apt.patientId.gender,
-        dob: apt.patientId.dob,
-        lastAppointmentDate: apt.appointmentDate,
-        lastStatus: apt.status,
-      }));
-
-    const uniquePatientsMap = new Map();
-
-    patients.forEach((patient) => {
-      const id = patient._id.toString();
-
-      if (!uniquePatientsMap.has(id)) {
-        uniquePatientsMap.set(id, patient);
-      }
-    });
-
-    patients = Array.from(uniquePatientsMap.values());
-
-    if (search.trim()) {
-      const regex = new RegExp(search.trim(), "i");
-
-      patients = patients.filter(
-        (patient) =>
-          regex.test(patient.fullName || "") ||
-          regex.test(patient.email || "") ||
-          regex.test(patient.phone || "")
-      );
-    }
-
-    const total = patients.length;
-    const paginatedPatients = patients.slice(
-      (pageNumber - 1) * limitNumber,
-      pageNumber * limitNumber
-    );
-
-    res.json({
-      success: true,
-      patients: paginatedPatients,
-      total,
-      totalPages: Math.ceil(total / limitNumber),
-      currentPage: pageNumber,
-    });
-  } catch (error) {
-    console.error("Search doctor patients error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Unable to fetch patients",
-      error: error.message,
-    });
-  }
-};
 // Get Patient's Prescriptions
 exports.getPatientPrescriptions = async (req, res) => {
   try {
@@ -563,44 +476,25 @@ exports.getPatientPrescriptions = async (req, res) => {
 exports.getPrescriptionById = async (req, res) => {
   try {
     const prescription = await Prescription.findById(req.params.id)
-      .populate("patientId", "fullName email phone dob gender profileImage")
-      .populate("doctorId", "fullName email doctorProfile profileImage");
+      .populate('patientId', 'fullName email phone dob gender')
+      .populate('doctorId', 'fullName doctorProfile profileImage');
 
     if (!prescription) {
-      return res.status(404).json({
-        success: false,
-        message: "Prescription not found",
-      });
+      return res.status(404).json({ success: false, message: 'Prescription not found' });
     }
 
-    const patientId = prescription.patientId?._id?.toString();
-    const doctorId = prescription.doctorId?._id?.toString();
-    const loggedInUserId = req.user.id?.toString();
-
-    const isAuthorized =
-      req.user.role === "SUPER_ADMIN" ||
-      loggedInUserId === patientId ||
-      loggedInUserId === doctorId;
+    // Authorization
+    const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
+      req.user.id === prescription.patientId.toString() ||
+      req.user.id === prescription.doctorId.toString();
 
     if (!isAuthorized) {
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized",
-      });
+      return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
-    return res.json({
-      success: true,
-      prescription,
-    });
+    res.json({ success: true, prescription });
   } catch (error) {
-    console.error("Get prescription by ID error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch prescription",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
@@ -783,27 +677,66 @@ exports.deleteHealthRecord = async (req, res) => {
 // ======================
 exports.searchDoctors = async (req, res) => {
   try {
-    const { search = "", page = 1, limit = 10 } = req.query;
+    const {
+      search = "",
+      specialization = "",
+      state = "",
+      district = "",
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const pageNumber = Math.max(Number(page), 1);
+    const limitNumber = Math.max(Number(limit), 1);
 
     const filter = {
-      role: 'DOCTOR',
-      isVerified: true,
+      role: "DOCTOR",
       isDeleted: false,
-      'doctorVerification.verificationStatus': 'approved'    // 🆕 only verified doctors appear
+      "doctorVerification.verificationStatus": "approved",
     };
-    if (specialization) filter['doctorProfile.specialization'] = { $regex: specialization, $options: 'i' };
-    if (state) filter.state = state;
-    if (district) filter.district = district;
 
-    const doctors = await User.find(filter)
-      .select(
-        "fullName email phone profileImage doctorProfile state district city isActive rating"
-      )
-      .skip((pageNumber - 1) * limitNumber)
-      .limit(limitNumber)
-      .sort({ "doctorProfile.experienceYears": -1 });
+    if (specialization.trim()) {
+      filter["doctorProfile.specialization"] = {
+        $regex: specialization.trim(),
+        $options: "i",
+      };
+    }
 
-    const total = await User.countDocuments(filter);
+    if (state.trim()) {
+      filter.state = state.trim();
+    }
+
+    if (district.trim()) {
+      filter.district = district.trim();
+    }
+
+    if (search.trim()) {
+      filter.$or = [
+        { fullName: { $regex: search.trim(), $options: "i" } },
+        { city: { $regex: search.trim(), $options: "i" } },
+        { state: { $regex: search.trim(), $options: "i" } },
+        { district: { $regex: search.trim(), $options: "i" } },
+        {
+          "doctorProfile.specialization": {
+            $regex: search.trim(),
+            $options: "i",
+          },
+        },
+      ];
+    }
+
+    const [doctors, total] = await Promise.all([
+      User.find(filter)
+        .select(
+          "fullName email phone profileImage doctorProfile state district city isActive rating"
+        )
+        .sort({ "doctorProfile.experienceYears": -1 })
+        .skip((pageNumber - 1) * limitNumber)
+        .limit(limitNumber)
+        .lean(),
+
+      User.countDocuments(filter),
+    ]);
 
     res.json({
       success: true,
@@ -813,87 +746,11 @@ exports.searchDoctors = async (req, res) => {
       total,
     });
   } catch (error) {
+    console.error("Search doctors error:", error);
+
     res.status(500).json({
       success: false,
       message: "Unable to fetch doctors",
-      error: error.message,
-    });
-  }
-};
-// ======================
-// DOCTOR DASHBOARD
-// ======================
-
-exports.getDoctorDashboard = async (req, res) => {
-  try {
-    const doctorId = req.user.id;
-
-    const doctorObjectId = new mongoose.Types.ObjectId(doctorId);
-
-    const totalAppointments = await Appointment.countDocuments({
-      doctorId: doctorObjectId,
-    });
-
-    const appointments = await Appointment.find({
-      doctorId: doctorObjectId,
-      patientId: { $exists: true, $ne: null },
-    }).select("patientId");
-
-    const uniquePatients = new Set(
-      appointments
-        .map((a) => a.patientId?.toString())
-        .filter(Boolean)
-    );
-
-    const totalPatients = uniquePatients.size;
-
-    const totalPrescriptions = await Prescription.countDocuments({
-      doctorId: doctorObjectId,
-    });
-
-    const revenueAgg = await Appointment.aggregate([
-      {
-        $match: {
-          doctorId: doctorObjectId,
-          status: "completed",
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalRevenue: {
-            $sum: {
-              $ifNull: ["$payment.amount", 0],
-            },
-          },
-        },
-      },
-    ]);
-
-    const totalRevenue = revenueAgg[0]?.totalRevenue || 0;
-
-    const recentAppointments = await Appointment.find({
-      doctorId: doctorObjectId,
-    })
-      .populate("patientId", "fullName email phone profileImage")
-      .sort({ appointmentDate: -1 })
-      .limit(10);
-
-    res.json({
-      success: true,
-      stats: {
-        totalAppointments,
-        totalPatients,
-        totalPrescriptions,
-        totalRevenue,
-      },
-      recentAppointments,
-    });
-  } catch (error) {
-    console.error("Doctor dashboard error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to load dashboard",
       error: error.message,
     });
   }
@@ -985,7 +842,6 @@ exports.verifyDoctor = async (req, res) => {
 exports.getDoctorDashboard = async (req, res) => {
   try {
     const doctorId = req.user.id;
-
     const [totalAppointments, patientIds, totalPrescriptions, recentAppointments] =
       await Promise.all([
         Appointment.countDocuments({ doctorId }),
@@ -1002,7 +858,7 @@ exports.getDoctorDashboard = async (req, res) => {
     const revenueData = await Appointment.aggregate([
       {
         $match: {
-          doctorId: mongoose.Types.ObjectId(doctorId),
+          doctorId: new mongoose.Types.ObjectId(doctorId),
           status: 'completed',
         },
       },

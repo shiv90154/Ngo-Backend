@@ -32,20 +32,43 @@ const upload = multer({
 });
 
 // ========== USER ROUTES (For displaying ads in feed) ==========
-router.get('/feed-ad', protect, adController.getFeedAd);        // Get a single ad for feed insertion
-router.post('/track-impression', protect, adController.trackImpression);
-router.post('/track-click', protect, adController.trackClick);
+router.get("/feed-ad", protect, adController.getFeedAd);
+router.post("/track-impression", protect, adController.trackImpression);
+router.post("/track-click", protect, adController.trackClick);
 
-// ========== ADMIN ROUTES (For managing ad campaigns) ==========
-router.post('/campaigns', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), upload.array('media', 5), adController.createCampaign);
-router.get('/campaigns', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adController.getCampaigns);
-router.get('/campaigns/:id', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adController.getCampaign);
-router.put('/campaigns/:id', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), upload.array('media', 5), adController.updateCampaign);
-router.delete('/campaigns/:id', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adController.deleteCampaign);
-router.patch('/campaigns/:id/status', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adController.updateCampaignStatus);
+// ========== CAMPAIGN ROUTES (Users + Seniors) ==========
+router.post("/campaigns", protect, upload.array("media", 5), adController.createCampaign);
 
-// Analytics
-router.get('/analytics', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adController.getAnalytics);
-router.get('/analytics/campaign/:campaignId', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adController.getCampaignAnalytics);
+// Get campaigns
+// - Users → only their campaigns
+// - Seniors → all campaigns
+router.get("/campaigns", protect, adController.getCampaigns);
+
+// Get single campaign
+// - Owner or senior only
+router.get("/campaigns/:id", protect, adController.getCampaign);
+
+// Update campaign
+// - Owner can update (goes back to pending)
+// - Seniors can update directly
+router.put("/campaigns/:id", protect, upload.array("media", 5), adController.updateCampaign);
+
+// Delete campaign
+// - Owner or senior
+router.delete("/campaigns/:id", protect, adController.deleteCampaign);
+
+// Approve / Reject / Change Status (ONLY seniors)
+router.patch("/campaigns/:id/status", protect, authorize("SUPER_ADMIN", "ADDITIONAL_DIRECTOR", "STATE_OFFICER", "DISTRICT_MANAGER", "DISTRICT_PRESIDENT"), adController.updateCampaignStatus);
+
+// ========== ANALYTICS ROUTES ==========
+
+// Global analytics
+// - Users → their own data
+// - Seniors → all data
+router.get("/analytics", protect, adController.getAnalytics);
+
+// Single campaign analytics
+// - Owner or senior
+router.get("/analytics/campaign/:id", protect, adController.getCampaignAnalytics);
 
 module.exports = router;

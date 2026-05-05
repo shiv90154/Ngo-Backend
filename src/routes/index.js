@@ -3,7 +3,7 @@ const router = express.Router();
 
 const userRoutes = require('./auth.routes');
 const healthcareRoutes = require('./healthcare.routes');
-const medicineRoutes = require('./medicines.routes');        
+const medicineRoutes = require('./medicines.routes');
 const mediaRoutes = require('./media.routes');
 const notificationRoutes = require('./notification.routes');
 const adminRoutes = require('./admin.routes');
@@ -18,7 +18,7 @@ const adRoutes = require('./ad.routes');
 const donationRoutes = require('./donation.routes');
 const clubRoutes = require('./club.routes');                 // ✅ fixed – proper import
 const dashboardRoutes = require('./dashboard.routes');
-
+const contractRoutes = require('./contract.routes');
 const searchController = require('../controllers/search.controller');
 
 // Health check
@@ -44,7 +44,7 @@ router.use('/ads', adRoutes);
 router.use('/donations', donationRoutes);
 router.use('/club', clubRoutes);                             // ✅ Club routes mounted
 router.use('/dashboard', dashboardRoutes);
-
+router.use('/contracts', contractRoutes);
 router.get('/search', require('../controllers/search.controller').globalSearch);
 
 module.exports = router;

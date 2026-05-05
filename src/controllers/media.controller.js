@@ -46,106 +46,144 @@ const transformAdToPost = (ad) => ({
   _id: `ad_${ad._id}`,
   adId: ad._id.toString(),
   isAd: true,
-  businessName: ad.businessName,
-  content: ad.content,
-  media: ad.media || [],
-  ctaText: ad.ctaText || 'Learn More',
-  targetUrl: ad.targetUrl,
-  createdAt: ad.createdAt,
+
+  businessName: ad.businessName || ad.title || "Sponsored",
+  content: ad.content || ad.description || ad.title || "",
+
+  media: ad.media?.length
+    ? ad.media
+    : ad.imageUrl
+      ? [{ url: ad.imageUrl, type: "image" }]
+      : [],
+
+  ctaText: ad.ctaText || "Learn More",
+  targetUrl: ad.targetUrl || ad.websiteUrl || "#",
+
+  createdAt: ad.createdAt || new Date(),
+  updatedAt: ad.updatedAt || ad.createdAt || new Date(),
+
   author: {
-    _id: ad.advertiserId,
-    fullName: ad.businessName,
-    profileImage: null
+    _id: ad.advertiserId || ad.createdBy || "sponsored",
+    fullName: ad.businessName || "Sponsored",
+    profileImage: ad.logo || null,
   },
-  likesCount: 0,
-  commentsCount: 0,
-  isLiked: false,
-  tags: [],
-  updatedAt: ad.createdAt
 });
 
 // Unified function to get ad for feed (used by both media and ad controllers)
 const getAdForFeed = async (userId, userRole, userState, userDistrict, userBlock) => {
   try {
     const now = new Date();
-    const user = await User.findById(userId);
-    if (!user) return null;
 
-    // Check daily ad limit
+    const user = await User.findById(userId);
+    if (!user) {
+      console.log("AD DEBUG: User not found");
+      return null;
+    }
+
+
+
+    const allAds = await AdCampaign.find({}).lean();
+
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+
     const todayAdViews = await AdEvent.countDocuments({
       userId: user._id,
-      eventType: 'impression',
-      createdAt: { $gte: today }
+      eventType: "impression",
+      createdAt: { $gte: today },
     });
 
-    const maxAdsPerDay = user.adPreferences?.maxAdsPerDay || 10;
-    if (todayAdViews >= maxAdsPerDay) return null;
+    // const maxAdsPerDay = user.adPreferences?.maxAdsPerDay || 10; //uncomment
+    const maxAdsPerDay = 100; //uncomment
 
-    // Filter out recently seen ads (last 2 hours)
+    if (todayAdViews >= maxAdsPerDay) {
+      console.log("AD BLOCKED: Daily ad limit reached");
+      console.log("========== AD DEBUG END ==========");
+      return null;
+    }
+
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
     const recentAdViews = await AdEvent.find({
       userId: user._id,
-      eventType: 'impression',
-      createdAt: { $gte: twoHoursAgo }
-    }).distinct('campaignId');
+      eventType: "impression",
+      createdAt: { $gte: twoHoursAgo },
+    }).distinct("campaignId");
 
-    // Build targeting query
+    const orConditions = [{ "targetAudience.allUsers": true }];
+
+    if (userState) {
+      orConditions.push({ "targetAudience.states": { $in: [userState] } });
+    }
+
+    if (userDistrict) {
+      orConditions.push({ "targetAudience.districts": { $in: [userDistrict] } });
+    }
+
+    if (userBlock) {
+      orConditions.push({ "targetAudience.blocks": { $in: [userBlock] } });
+    }
+
     const targetQuery = {
-      status: 'active',
+      status: "active",
       startDate: { $lte: now },
       endDate: { $gte: now },
-      _id: { $nin: recentAdViews },
-      $or: [
-        { 'targetAudience.allUsers': true },
-        ...(userState && userDistrict && userBlock ? [{
-          $and: [
-            { 'targetAudience.states': { $in: [userState] } },
-            { 'targetAudience.districts': { $in: [userDistrict] } },
-            { 'targetAudience.blocks': { $in: [userBlock] } }
-          ]
-        }] : [])
-      ]
+      // _id: { $nin: recentAdViews },//uncomment
+      $or: orConditions,
     };
-    // Weighted random selection based on bid amount
     const campaigns = await AdCampaign.find(targetQuery).lean();
-    if (!campaigns.length) return null;
 
-    const totalBid = campaigns.reduce((sum, c) => sum + (c.bidAmount || 0), 0);
+    let selectedCampaign = campaigns[0];
+
+    const totalBid = campaigns.reduce((sum, c) => sum + (c.bidAmount || 1), 0);
     let random = Math.random() * totalBid;
-    let selectedCampaign = null;
 
     for (const campaign of campaigns) {
-      if (random < (campaign.bidAmount || 0)) {
+      const weight = campaign.bidAmount || 1;
+
+      if (random < weight) {
         selectedCampaign = campaign;
         break;
       }
-      random -= (campaign.bidAmount || 0);
-    }
-    if (!selectedCampaign) selectedCampaign = campaigns[0];
 
-    // Track impression asynchronously
+      random -= weight;
+    }
+
+
     Promise.all([
       AdEvent.create({
         campaignId: selectedCampaign._id,
-        userId: userId,
-        eventType: 'impression',
+        userId,
+        eventType: "impression",
         metadata: {
-          userLocation: { state: userState || 'unknown', district: userDistrict || 'unknown', block: userBlock || 'unknown' },
-          userRole: userRole,
-        }
+          userLocation: {
+            state: userState || "unknown",
+            district: userDistrict || "unknown",
+            block: userBlock || "unknown",
+          },
+          userRole,
+        },
       }),
-      AdCampaign.findByIdAndUpdate(selectedCampaign._id, { $inc: { impressions: 1 } }),
+
+      AdCampaign.findByIdAndUpdate(selectedCampaign._id, {
+        $inc: { impressions: 1 },
+      }),
+
       User.findByIdAndUpdate(userId, {
-        $push: { adsSeen: { campaignId: selectedCampaign._id, seenAt: new Date() } }
-      })
-    ]).catch(err => console.error('Failed to track impression:', err));
-    console.log("getting ad")
+        $push: {
+          adsSeen: {
+            campaignId: selectedCampaign._id,
+            seenAt: new Date(),
+          },
+        },
+      }),
+    ]).catch((err) => console.error("Failed to track impression:", err));
+
 
     return selectedCampaign;
   } catch (error) {
-    console.error('Error in getAdForFeed:', error);
+    console.error("Error in getAdForFeed:", error);
     return null;
   }
 };
@@ -297,39 +335,58 @@ exports.getCreatorProfile = async (req, res) => {
 // ---------- FEED ----------
 exports.getFeed = async (req, res) => {
   try {
-    const { page = 1, limit = 10 } = req.query;
-    const userId = req.user.id;
-    const skip = (page - 1) * limit;
+    const pageNumber = Math.max(Number(req.query.page) || 1, 1);
+    const limitNumber = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
 
-    const following = await Follow.find({ follower: userId }).select('following').lean();
-    const followingIds = following.map(f => f.following);
+    const userId = req.user.id;
+    const skip = (pageNumber - 1) * limitNumber;
+
+    const following = await Follow.find({ follower: userId })
+      .select("following")
+      .lean();
+
+    const followingIds = following.map((f) => f.following);
     followingIds.push(userId);
 
+    const filter = { author: { $in: followingIds } };
+
     const [posts, total] = await Promise.all([
-      MediaPost.find({ author: { $in: followingIds } })
-        .populate('author', 'fullName profileImage mediaCreatorProfile')
+      MediaPost.find(filter)
+        .populate("author", "fullName profileImage mediaCreatorProfile")
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(Number(limit))
+        .limit(limitNumber)
         .lean(),
-      MediaPost.countDocuments({ author: { $in: followingIds } }),
+
+      MediaPost.countDocuments(filter),
     ]);
 
     await addLikeStatus(posts, userId);
 
-    let finalPosts = [...posts];
-    if (parseInt(page) === 1 && posts.length >= 2) {
-      const ad = await getAdForFeed(userId, req.user.role, req.user.state, req.user.district, req.user.block);
+    const finalPosts = [...posts];
+
+    if (pageNumber === 1) {
+      const ad = await getAdForFeed(
+        userId,
+        req.user.role,
+        req.user.state,
+        req.user.district,
+        req.user.block
+      );
       if (ad) {
         const transformedAd = transformAdToPost(ad);
-        const insertPosition = Math.min(2, finalPosts.length);
-        finalPosts.splice(insertPosition, 0, transformedAd);
+        finalPosts.splice(Math.min(2, finalPosts.length), 0, transformedAd);
       }
     }
 
-    res.json({ success: true, posts: finalPosts, totalPages: Math.ceil(total / limit), currentPage: Number(page) });
+    res.json({
+      success: true,
+      posts: finalPosts,
+      totalPages: Math.ceil(total / limitNumber),
+      currentPage: pageNumber,
+    });
   } catch (error) {
-    console.error('Feed error:', error);
+    console.error("Feed error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 };

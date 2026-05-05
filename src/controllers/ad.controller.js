@@ -93,7 +93,34 @@ exports.trackImpression = async (req, res) => {
     }
 };
 
-// ========== ADMIN CONTROLLERS ==========
+// ========== ADMIN CONTROLLERS ==========const 
+SENIOR_ROLES = [
+    "SUPER_ADMIN",
+    "ADDITIONAL_DIRECTOR",
+    "STATE_OFFICER",
+    "DISTRICT_MANAGER",
+    "DISTRICT_PRESIDENT",
+];
+
+const normalizeTargetAudience = (targetAudience) => {
+    let parsed = {};
+
+    if (targetAudience) {
+        parsed =
+            typeof targetAudience === "string"
+                ? JSON.parse(targetAudience)
+                : targetAudience;
+    }
+
+    return {
+        allUsers: parsed.allUsers ?? true,
+        states: Array.isArray(parsed.states) ? parsed.states : [],
+        districts: Array.isArray(parsed.districts) ? parsed.districts : [],
+        blocks: Array.isArray(parsed.blocks) ? parsed.blocks : [],
+        roles: Array.isArray(parsed.roles) ? parsed.roles : [],
+    };
+};
+
 exports.createCampaign = async (req, res) => {
     try {
         const {
@@ -109,182 +136,457 @@ exports.createCampaign = async (req, res) => {
         } = req.body;
 
         const media = [];
-        if (req.files && req.files.length > 0) {
+
+        if (req.files?.length > 0) {
             for (const file of req.files) {
-                const fileType = file.mimetype.startsWith('image/') ? 'image' : 'video';
+                const fileType = file.mimetype.startsWith("image/") ? "image" : "video";
+
                 media.push({
                     type: fileType,
                     url: `/uploads/ads/${file.filename}`,
-                    thumbnail: fileType === 'video' ? `/uploads/ads/thumb_${file.filename}.jpg` : null,
+                    thumbnail:
+                        fileType === "video"
+                            ? `/uploads/ads/thumb_${file.filename}.jpg`
+                            : null,
                 });
             }
         }
 
         const campaign = await AdCampaign.create({
             advertiserId: req.user.id,
+            createdBy: req.user.id,
+
             businessName,
             content,
             media,
-            ctaText: ctaText || 'Learn More',
+            ctaText: ctaText || "Learn More",
             targetUrl,
-            totalBudget: parseFloat(totalBudget),
-            bidAmount: parseFloat(bidAmount),
-            targetAudience: typeof targetAudience === 'string' ? JSON.parse(targetAudience) : targetAudience,
-            startDate: new Date(startDate),
-            endDate: new Date(endDate),
-            createdBy: req.user.id,
+
+            totalBudget: Number(totalBudget),
+            bidAmount: Number(bidAmount) || 1,
+
+            targetAudience: normalizeTargetAudience(targetAudience),
+
+            startDate: startDate ? new Date(startDate) : new Date(),
+            endDate: endDate
+                ? new Date(endDate)
+                : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+
+            status: "pending_approval",
         });
 
-        res.status(201).json({ success: true, data: campaign });
+        res.status(201).json({
+            success: true,
+            message: "Campaign submitted for approval",
+            data: campaign,
+        });
     } catch (error) {
-        console.error('Create campaign error:', error);
-        res.status(500).json({ success: false, message: error.message });
+        console.error("Create campaign error:", error);
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
     }
 };
 
 exports.getCampaigns = async (req, res) => {
     try {
         const { status, page = 1, limit = 20 } = req.query;
+
+        const pageNumber = Math.max(Number(page) || 1, 1);
+        const limitNumber = Math.min(Math.max(Number(limit) || 20, 1), 100);
+
         const query = { isDeleted: false };
+
         if (status) query.status = status;
 
-        const campaigns = await AdCampaign.find(query)
-            .populate('advertiserId', 'fullName email')
-            .sort({ createdAt: -1 })
-            .limit(limit * 1)
-            .skip((page - 1) * limit);
+        // Normal users see only their own campaigns
+        // Senior roles see all campaigns
+        if (!SENIOR_ROLES.includes(req.user.role)) {
+            query.advertiserId = req.user.id;
+        }
 
-        const total = await AdCampaign.countDocuments(query);
-        res.json({ success: true, data: campaigns, total, page: parseInt(page), pages: Math.ceil(total / limit) });
+        const [campaigns, total] = await Promise.all([
+            AdCampaign.find(query)
+                .populate("advertiserId", "fullName email profileImage role")
+                .populate("createdBy", "fullName email profileImage role")
+                .populate("approvedBy", "fullName email profileImage role")
+                .sort({ createdAt: -1 })
+                .skip((pageNumber - 1) * limitNumber)
+                .limit(limitNumber)
+                .lean(),
+
+            AdCampaign.countDocuments(query),
+        ]);
+
+        res.json({
+            success: true,
+            data: campaigns,
+            total,
+            page: pageNumber,
+            pages: Math.ceil(total / limitNumber),
+        });
     } catch (error) {
-        console.error('Get campaigns error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
+        console.error("Get campaigns error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+            error: error.message,
+        });
     }
 };
 
 exports.getCampaign = async (req, res) => {
     try {
         const campaign = await AdCampaign.findById(req.params.id)
-            .populate('advertiserId', 'fullName email')
-            .populate('createdBy', 'fullName')
-            .populate('approvedBy', 'fullName');
+            .populate("advertiserId", "fullName email profileImage role")
+            .populate("createdBy", "fullName email profileImage role")
+            .populate("approvedBy", "fullName email profileImage role");
 
         if (!campaign || campaign.isDeleted) {
-            return res.status(404).json({ success: false, message: 'Campaign not found' });
+            return res.status(404).json({
+                success: false,
+                message: "Campaign not found",
+            });
         }
-        res.json({ success: true, data: campaign });
+
+        const advertiserId =
+            campaign.advertiserId?._id?.toString() ||
+            campaign.advertiserId?.toString();
+
+        const isOwner = advertiserId === req.user.id;
+        const isSenior = SENIOR_ROLES.includes(req.user.role);
+
+        if (!isOwner && !isSenior) {
+            return res.status(403).json({
+                success: false,
+                message: "Not authorized to view this campaign",
+            });
+        }
+
+        res.json({
+            success: true,
+            data: campaign,
+        });
     } catch (error) {
-        console.error('Get campaign error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
+        console.error("Get campaign error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+            error: error.message,
+        });
     }
 };
 
 exports.updateCampaign = async (req, res) => {
     try {
         const campaign = await AdCampaign.findById(req.params.id);
+
         if (!campaign || campaign.isDeleted) {
-            return res.status(404).json({ success: false, message: 'Campaign not found' });
+            return res.status(404).json({
+                success: false,
+                message: "Campaign not found",
+            });
         }
 
-        const updates = req.body;
-        if (req.files && req.files.length > 0) {
-            const media = [];
-            for (const file of req.files) {
-                const fileType = file.mimetype.startsWith('image/') ? 'image' : 'video';
-                media.push({ type: fileType, url: `/uploads/ads/${file.filename}` });
-            }
-            updates.media = media;
+        const isOwner = campaign.advertiserId.toString() === req.user.id;
+        const isSenior = SENIOR_ROLES.includes(req.user.role);
+
+        if (!isOwner && !isSenior) {
+            return res.status(403).json({
+                success: false,
+                message: "Not authorized to update this campaign",
+            });
         }
 
-        if (updates.targetAudience && typeof updates.targetAudience === 'string') {
-            updates.targetAudience = JSON.parse(updates.targetAudience);
+        if (campaign.status === "active" && !isSenior) {
+            return res.status(403).json({
+                success: false,
+                message: "Active campaigns can only be updated by senior roles",
+            });
         }
 
-        const updated = await AdCampaign.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
-        res.json({ success: true, data: updated });
+        const updates = { ...req.body };
+
+        delete updates.status;
+        delete updates.approvedBy;
+        delete updates.approvedAt;
+        delete updates.impressions;
+        delete updates.clicks;
+        delete updates.spentBudget;
+        delete updates.createdBy;
+        delete updates.advertiserId;
+
+        if (updates.targetAudience) {
+            updates.targetAudience = normalizeTargetAudience(updates.targetAudience);
+        }
+
+        if (updates.totalBudget !== undefined) {
+            updates.totalBudget = Number(updates.totalBudget);
+        }
+
+        if (updates.bidAmount !== undefined) {
+            updates.bidAmount = Number(updates.bidAmount);
+        }
+
+        if (updates.startDate) {
+            updates.startDate = new Date(updates.startDate);
+        }
+
+        if (updates.endDate) {
+            updates.endDate = new Date(updates.endDate);
+        }
+
+        if (req.files?.length > 0) {
+            updates.media = req.files.map((file) => {
+                const fileType = file.mimetype.startsWith("image/") ? "image" : "video";
+
+                return {
+                    type: fileType,
+                    url: `/uploads/ads/${file.filename}`,
+                    thumbnail:
+                        fileType === "video"
+                            ? `/uploads/ads/thumb_${file.filename}.jpg`
+                            : null,
+                };
+            });
+        }
+
+        if (isOwner && !isSenior) {
+            updates.status = "pending_approval";
+            updates.approvedBy = undefined;
+            updates.approvedAt = undefined;
+        }
+
+        const updated = await AdCampaign.findByIdAndUpdate(req.params.id, updates, {
+            returnDocument: "after",
+            runValidators: true,
+        });
+
+        res.json({
+            success: true,
+            message:
+                isOwner && !isSenior
+                    ? "Campaign updated and sent for approval"
+                    : "Campaign updated",
+            data: updated,
+        });
     } catch (error) {
-        console.error('Update campaign error:', error);
-        res.status(500).json({ success: false, message: error.message });
+        console.error("Update campaign error:", error);
+        res.status(500).json({
+            success: false,
+            message: error.message,
+        });
     }
 };
 
 exports.deleteCampaign = async (req, res) => {
     try {
-        await AdCampaign.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date(), status: 'completed' });
-        res.json({ success: true, message: 'Campaign deleted' });
+        const campaign = await AdCampaign.findById(req.params.id);
+
+        if (!campaign || campaign.isDeleted) {
+            return res.status(404).json({
+                success: false,
+                message: "Campaign not found",
+            });
+        }
+
+        const isOwner = campaign.advertiserId.toString() === req.user.id;
+        const isSenior = SENIOR_ROLES.includes(req.user.role);
+
+        if (!isOwner && !isSenior) {
+            return res.status(403).json({
+                success: false,
+                message: "Not authorized to delete this campaign",
+            });
+        }
+
+        campaign.isDeleted = true;
+        campaign.deletedAt = new Date();
+        campaign.status = "completed";
+
+        await campaign.save();
+
+        res.json({
+            success: true,
+            message: "Campaign deleted",
+        });
     } catch (error) {
-        console.error('Delete campaign error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
+        console.error("Delete campaign error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+        });
     }
 };
 
 exports.updateCampaignStatus = async (req, res) => {
     try {
-        const { status } = req.body;
+        if (!SENIOR_ROLES.includes(req.user.role)) {
+            return res.status(403).json({
+                success: false,
+                message: "Only senior roles can approve or reject campaigns",
+            });
+        }
+
+        const { status, rejectionReason } = req.body;
+
+        const allowedStatuses = [
+            "pending_approval",
+            "active",
+            "paused",
+            "completed",
+            "rejected",
+        ];
+
+        if (!allowedStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid campaign status",
+            });
+        }
+
         const updateData = { status };
-        if (status === 'active') {
+
+        if (status === "active") {
             updateData.approvedBy = req.user.id;
             updateData.approvedAt = new Date();
+            updateData.rejectionReason = undefined;
         }
-        const campaign = await AdCampaign.findByIdAndUpdate(req.params.id, updateData, { new: true });
-        res.json({ success: true, data: campaign });
+
+        if (status === "rejected") {
+            updateData.rejectionReason = rejectionReason || "Campaign rejected";
+        }
+
+        const campaign = await AdCampaign.findOneAndUpdate(
+            { _id: req.params.id, isDeleted: false },
+            updateData,
+            {
+                returnDocument: "after",
+                runValidators: true,
+            }
+        );
+
+        if (!campaign) {
+            return res.status(404).json({
+                success: false,
+                message: "Campaign not found",
+            });
+        }
+
+        res.json({
+            success: true,
+            message:
+                status === "active"
+                    ? "Campaign approved and activated"
+                    : `Campaign marked as ${status}`,
+            data: campaign,
+        });
     } catch (error) {
-        console.error('Update status error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
+        console.error("Update status error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+        });
     }
 };
 
 exports.getAnalytics = async (req, res) => {
     try {
-        const totalCampaigns = await AdCampaign.countDocuments({ isDeleted: false });
-        const activeCampaigns = await AdCampaign.countDocuments({ status: 'active' });
-        const totalImpressions = await AdCampaign.aggregate([
-            { $match: { isDeleted: false } },
-            { $group: { _id: null, total: { $sum: '$impressions' } } }
-        ]);
-        const totalClicks = await AdCampaign.aggregate([
-            { $match: { isDeleted: false } },
-            { $group: { _id: null, total: { $sum: '$clicks' } } }
-        ]);
-        const totalSpent = await AdCampaign.aggregate([
-            { $match: { isDeleted: false } },
-            { $group: { _id: null, total: { $sum: '$spentBudget' } } }
-        ]);
+        const query = { isDeleted: false };
+
+        if (!SENIOR_ROLES.includes(req.user.role)) {
+            query.advertiserId = req.user.id;
+        }
+
+        const [totalCampaigns, activeCampaigns, totalImpressions, totalClicks, totalSpent] =
+            await Promise.all([
+                AdCampaign.countDocuments(query),
+                AdCampaign.countDocuments({ ...query, status: "active" }),
+                AdCampaign.aggregate([
+                    { $match: query },
+                    { $group: { _id: null, total: { $sum: "$impressions" } } },
+                ]),
+                AdCampaign.aggregate([
+                    { $match: query },
+                    { $group: { _id: null, total: { $sum: "$clicks" } } },
+                ]),
+                AdCampaign.aggregate([
+                    { $match: query },
+                    { $group: { _id: null, total: { $sum: "$spentBudget" } } },
+                ]),
+            ]);
+
+        const impressions = totalImpressions[0]?.total || 0;
+        const clicks = totalClicks[0]?.total || 0;
 
         res.json({
             success: true,
             data: {
                 totalCampaigns,
                 activeCampaigns,
-                totalImpressions: totalImpressions[0]?.total || 0,
-                totalClicks: totalClicks[0]?.total || 0,
+                totalImpressions: impressions,
+                totalClicks: clicks,
                 totalSpent: totalSpent[0]?.total || 0,
-                ctr: totalImpressions[0]?.total > 0 ? ((totalClicks[0]?.total || 0) / totalImpressions[0].total * 100).toFixed(2) : 0
-            }
+                ctr: impressions > 0 ? ((clicks / impressions) * 100).toFixed(2) : 0,
+            },
         });
     } catch (error) {
-        console.error('Get analytics error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
+        console.error("Get analytics error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+        });
     }
 };
 
 exports.getCampaignAnalytics = async (req, res) => {
     try {
         const campaign = await AdCampaign.findById(req.params.id);
-        if (!campaign) {
-            return res.status(404).json({ success: false, message: 'Campaign not found' });
+
+        if (!campaign || campaign.isDeleted) {
+            return res.status(404).json({
+                success: false,
+                message: "Campaign not found",
+            });
         }
 
-        const clicksByDate = await AdEvent.aggregate([
-            { $match: { campaignId: campaign._id, eventType: 'click' } },
-            { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
-            { $sort: { _id: 1 } }
-        ]);
+        const isOwner = campaign.advertiserId.toString() === req.user.id;
+        const isSenior = SENIOR_ROLES.includes(req.user.role);
 
-        const impressionsByDate = await AdEvent.aggregate([
-            { $match: { campaignId: campaign._id, eventType: 'impression' } },
-            { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
-            { $sort: { _id: 1 } }
+        if (!isOwner && !isSenior) {
+            return res.status(403).json({
+                success: false,
+                message: "Not authorized to view analytics",
+            });
+        }
+
+        const [clicksByDate, impressionsByDate] = await Promise.all([
+            AdEvent.aggregate([
+                { $match: { campaignId: campaign._id, eventType: "click" } },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+                        },
+                        count: { $sum: 1 },
+                    },
+                },
+                { $sort: { _id: 1 } },
+            ]),
+
+            AdEvent.aggregate([
+                { $match: { campaignId: campaign._id, eventType: "impression" } },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+                        },
+                        count: { $sum: 1 },
+                    },
+                },
+                { $sort: { _id: 1 } },
+            ]),
         ]);
 
         res.json({
@@ -294,15 +596,24 @@ exports.getCampaignAnalytics = async (req, res) => {
                 stats: {
                     impressions: campaign.impressions,
                     clicks: campaign.clicks,
-                    ctr: campaign.impressions > 0 ? (campaign.clicks / campaign.impressions * 100).toFixed(2) : 0,
+                    ctr:
+                        campaign.impressions > 0
+                            ? ((campaign.clicks / campaign.impressions) * 100).toFixed(2)
+                            : 0,
                     spentBudget: campaign.spentBudget,
                     remainingBudget: campaign.totalBudget - campaign.spentBudget,
                 },
-                dailyData: { clicks: clicksByDate, impressions: impressionsByDate }
-            }
+                dailyData: {
+                    clicks: clicksByDate,
+                    impressions: impressionsByDate,
+                },
+            },
         });
     } catch (error) {
-        console.error('Get campaign analytics error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
+        console.error("Get campaign analytics error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+        });
     }
 };
