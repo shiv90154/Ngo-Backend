@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const eventController = require('../controllers/event.controller');
-const { protect, restrictTo } = require('../middleware/auth.middleware');
+const { protect, restrictTo } = require('../middleware');
 
 // Public
 router.get('/upcoming', eventController.getUpcomingEvents);

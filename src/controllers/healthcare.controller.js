@@ -3,895 +3,600 @@ const Prescription = require('../models/Prescription');
 const HealthRecord = require('../models/HealthRecord');
 const DoctorAvailability = require('../models/DoctorAvailability');
 const User = require('../models/user.model');
-const Medicine = require('../models/Medicine');            // 🆕 for prescription-to-order
+const Medicine = require('../models/Medicine');
 const path = require('path');
 const fs = require('fs').promises;
 const mailer = require('../utils/sendEmail');
+const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/AppError');
 
 const uploadDir = path.join(__dirname, '../uploads/healthcare');
-(async () => {
-  await fs.mkdir(uploadDir, { recursive: true });
-})();
+fs.mkdir(uploadDir, { recursive: true }).catch(() => {});
 
-// ======================
-// DOCTOR AVAILABILITY
-// ======================
+// ─── AVAILABILITY ──────────────────────────────────────────────
+exports.setDoctorAvailability = catchAsync(async (req, res, next) => {
+  const doctorId = req.user.id;
+  const { workingDays, timeSlots, unavailableDates, consultationModes, isAcceptingAppointments } = req.body;
 
-// Set/Update Doctor Availability
-exports.setDoctorAvailability = async (req, res) => {
-  try {
-    const doctorId = req.user.id;
-    const { workingDays, timeSlots, unavailableDates, consultationModes, isAcceptingAppointments } = req.body;
-
-    // Verify user is a doctor
-    const doctor = await User.findById(doctorId);
-    if (!doctor || doctor.role !== 'DOCTOR') {
-      return res.status(403).json({ success: false, message: 'Only doctors can set availability' });
-    }
-
-    let availability = await DoctorAvailability.findOne({ doctorId });
-
-    if (!availability) {
-      availability = new DoctorAvailability({ doctorId });
-    }
-
-    if (workingDays) availability.workingDays = workingDays;
-    if (timeSlots) availability.timeSlots = timeSlots;
-    if (unavailableDates) availability.unavailableDates = unavailableDates;
-    if (consultationModes) availability.consultationModes = consultationModes;
-    if (isAcceptingAppointments !== undefined) availability.isAcceptingAppointments = isAcceptingAppointments;
-
-    availability.updatedBy = req.user.id;
-    await availability.save();
-
-    res.json({ success: true, message: 'Availability updated', availability });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  // Verify user is a doctor (already protected by restrictTo middleware)
+  const doctor = await User.findById(doctorId);
+  if (!doctor || doctor.role !== 'DOCTOR') {
+    throw new AppError('केवल डॉक्टर ही उपलब्धता सेट कर सकते हैं', 403);
   }
-};
 
-// Get Doctor Availability
-exports.getDoctorAvailability = async (req, res) => {
-  try {
-    const { doctorId } = req.params;
-    const availability = await DoctorAvailability.findOne({ doctorId });
-    if (!availability) {
-      return res.status(404).json({ success: false, message: 'Availability not set' });
+  let availability = await DoctorAvailability.findOne({ doctorId });
+  if (!availability) availability = new DoctorAvailability({ doctorId });
+
+  if (workingDays) availability.workingDays = workingDays;
+  if (timeSlots) availability.timeSlots = timeSlots;
+  if (unavailableDates) availability.unavailableDates = unavailableDates;
+  if (consultationModes) availability.consultationModes = consultationModes;
+  if (isAcceptingAppointments !== undefined) availability.isAcceptingAppointments = isAcceptingAppointments;
+
+  availability.updatedBy = req.user.id;
+  await availability.save();
+
+  res.json({ success: true, message: 'उपलब्धता अपडेट की गई', availability });
+});
+
+exports.getDoctorAvailability = catchAsync(async (req, res, next) => {
+  const { doctorId } = req.params;
+  const availability = await DoctorAvailability.findOne({ doctorId });
+  if (!availability) throw new AppError('उपलब्धता सेट नहीं की गई', 404);
+  res.json({ success: true, availability });
+});
+
+exports.getAvailableSlots = catchAsync(async (req, res, next) => {
+  const { doctorId, date } = req.query;
+  if (!doctorId || !date) throw new AppError('डॉक्टर ID और तारीख आवश्यक है', 400);
+
+  const appointmentDate = new Date(date);
+  const dayOfWeek = appointmentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+
+  const availability = await DoctorAvailability.findOne({ doctorId });
+  if (!availability) return res.json({ success: true, slots: [] });
+
+  const isUnavailable = availability.unavailableDates.some(
+    u => new Date(u.date).toDateString() === appointmentDate.toDateString()
+  );
+  if (isUnavailable) return res.json({ success: true, slots: [], message: 'डॉक्टर इस तारीख को उपलब्ध नहीं हैं' });
+
+  const daySlot = availability.timeSlots.find(s => s.day === dayOfWeek);
+  if (!daySlot) return res.json({ success: true, slots: [] });
+
+  const bookedAppointments = await Appointment.find({
+    doctorId,
+    appointmentDate: {
+      $gte: new Date(appointmentDate.setHours(0, 0, 0)),
+      $lt: new Date(appointmentDate.setHours(23, 59, 59)),
+    },
+    status: { $in: ['pending', 'confirmed'] },
+  }).select('timeSlot');
+
+  const slots = [];
+  const timeToMinutes = (timeStr) => {
+    const [time, modifier] = timeStr.split(' ');
+    let [hours, minutes] = time.split(':').map(Number);
+    if (modifier === 'PM' && hours !== 12) hours += 12;
+    if (modifier === 'AM' && hours === 12) hours = 0;
+    return hours * 60 + minutes;
+  };
+
+  const startMin = timeToMinutes(daySlot.startTime);
+  const endMin = timeToMinutes(daySlot.endTime);
+  const duration = daySlot.slotDuration;
+
+  for (let mins = startMin; mins < endMin; mins += duration) {
+    const slotStart = `${Math.floor(mins / 60).toString().padStart(2, '0')}:${(mins % 60).toString().padStart(2, '0')}`;
+    const slotEnd = `${Math.floor((mins + duration) / 60).toString().padStart(2, '0')}:${((mins + duration) % 60).toString().padStart(2, '0')}`;
+    const bookedCount = bookedAppointments.filter(b => b.timeSlot.start === slotStart).length;
+    if (bookedCount < daySlot.maxAppointmentsPerSlot) {
+      slots.push({ start: slotStart, end: slotEnd, available: daySlot.maxAppointmentsPerSlot - bookedCount });
     }
-    res.json({ success: true, availability });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
   }
-};
 
-// Get available slots for a specific date
-exports.getAvailableSlots = async (req, res) => {
-  try {
-    const { doctorId, date } = req.query;
-    if (!doctorId || !date) {
-      return res.status(400).json({ success: false, message: 'Doctor ID and date required' });
-    }
+  res.json({ success: true, slots });
+});
 
-    const appointmentDate = new Date(date);
-    const dayOfWeek = appointmentDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+// ─── APPOINTMENTS ───────────────────────────────────────────────
+exports.bookAppointment = catchAsync(async (req, res, next) => {
+  const { doctorId, appointmentDate, timeSlot, consultationType, symptoms, notes, paymentMethod } = req.body;
+  const patientId = req.user.id;
 
-    const availability = await DoctorAvailability.findOne({ doctorId });
-    if (!availability) {
-      return res.json({ success: true, slots: [] });
-    }
+  const doctor = await User.findOne({ _id: doctorId, role: 'DOCTOR' });
+  if (!doctor) throw new AppError('डॉक्टर नहीं मिले', 404);
 
-    // Check if doctor is unavailable on this date
-    const isUnavailable = availability.unavailableDates.some(
-      u => new Date(u.date).toDateString() === appointmentDate.toDateString()
-    );
-    if (isUnavailable) {
-      return res.json({ success: true, slots: [], message: 'Doctor unavailable on this date' });
-    }
-
-    // Find time slot configuration for this day
-    const daySlot = availability.timeSlots.find(s => s.day === dayOfWeek);
-    if (!daySlot) {
-      return res.json({ success: true, slots: [] });
-    }
-
-    // Get already booked appointments for this date
-    const bookedAppointments = await Appointment.find({
-      doctorId,
-      appointmentDate: {
-        $gte: new Date(appointmentDate.setHours(0, 0, 0)),
-        $lt: new Date(appointmentDate.setHours(23, 59, 59)),
-      },
-      status: { $in: ['pending', 'confirmed'] },
-    }).select('timeSlot');
-
-    // Generate available slots
-    const slots = [];
-    const startTime = daySlot.startTime;
-    const endTime = daySlot.endTime;
-    const duration = daySlot.slotDuration;
-
-    // Convert time to minutes for easier calculation
-    const timeToMinutes = (timeStr) => {
-      const [time, modifier] = timeStr.split(' ');
-      let [hours, minutes] = time.split(':').map(Number);
-      if (modifier === 'PM' && hours !== 12) hours += 12;
-      if (modifier === 'AM' && hours === 12) hours = 0;
-      return hours * 60 + minutes;
-    };
-
-    const startMinutes = timeToMinutes(startTime);
-    const endMinutes = timeToMinutes(endTime);
-
-    for (let mins = startMinutes; mins < endMinutes; mins += duration) {
-      const slotStart = `${Math.floor(mins / 60).toString().padStart(2, '0')}:${(mins % 60).toString().padStart(2, '0')}`;
-      const slotEndMins = mins + duration;
-      const slotEnd = `${Math.floor(slotEndMins / 60).toString().padStart(2, '0')}:${(slotEndMins % 60).toString().padStart(2, '0')}`;
-
-      // Count bookings for this slot
-      const bookedCount = bookedAppointments.filter(
-        b => b.timeSlot.start === slotStart
-      ).length;
-
-      if (bookedCount < daySlot.maxAppointmentsPerSlot) {
-        slots.push({
-          start: slotStart,
-          end: slotEnd,
-          available: daySlot.maxAppointmentsPerSlot - bookedCount,
-        });
-      }
-    }
-
-    res.json({ success: true, slots });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  const availability = await DoctorAvailability.findOne({ doctorId });
+  if (!availability || !availability.isAcceptingAppointments) {
+    throw new AppError('डॉक्टर अपॉइंटमेंट नहीं ले रहे', 400);
   }
-};
+  if (!availability.consultationModes[consultationType]) {
+    throw new AppError(`${consultationType} परामर्श उपलब्ध नहीं`, 400);
+  }
 
-// ======================
-// APPOINTMENTS
-// ======================
+  const date = new Date(appointmentDate);
+  const existing = await Appointment.findOne({
+    doctorId,
+    appointmentDate: {
+      $gte: new Date(date.setHours(0, 0, 0)),
+      $lt: new Date(date.setHours(23, 59, 59)),
+    },
+    'timeSlot.start': timeSlot.start,
+    status: { $in: ['pending', 'confirmed'] },
+  });
+  if (existing) throw new AppError('यह स्लॉट पहले ही बुक हो चुका है', 400);
 
-// Book Appointment
-exports.bookAppointment = async (req, res) => {
+  const appointment = new Appointment({
+    patientId,
+    doctorId,
+    appointmentDate,
+    timeSlot,
+    consultationType,
+    symptoms,
+    notes,
+    payment: {
+      amount: doctor.doctorProfile?.consultationFee || 0,
+      status: 'pending',
+      paymentMethod,
+    },
+    createdBy: patientId,
+  });
+  await appointment.save();
+
+  await appointment.populate('patientId', 'fullName email phone');
+  await appointment.populate('doctorId', 'fullName email doctorProfile');
+
   try {
-    const { doctorId, appointmentDate, timeSlot, consultationType, symptoms, notes, paymentMethod } = req.body;
-    const patientId = req.user.id;
-
-    // Validate doctor exists and is a doctor
-    const doctor = await User.findOne({ _id: doctorId, role: 'DOCTOR' });
-    if (!doctor) {
-      return res.status(404).json({ success: false, message: 'Doctor not found' });
-    }
-
-    // Check doctor availability
-    const availability = await DoctorAvailability.findOne({ doctorId });
-    if (!availability || !availability.isAcceptingAppointments) {
-      return res.status(400).json({ success: false, message: 'Doctor not accepting appointments' });
-    }
-
-    // Validate consultation mode
-    if (!availability.consultationModes[consultationType]) {
-      return res.status(400).json({ success: false, message: `${consultationType} consultation not available` });
-    }
-
-    // Check if slot is available
-    const date = new Date(appointmentDate);
-    const existingBooking = await Appointment.findOne({
-      doctorId,
-      appointmentDate: {
-        $gte: new Date(date.setHours(0, 0, 0)),
-        $lt: new Date(date.setHours(23, 59, 59)),
-      },
-      'timeSlot.start': timeSlot.start,
-      status: { $in: ['pending', 'confirmed'] },
-    });
-
-    if (existingBooking) {
-      return res.status(400).json({ success: false, message: 'Slot already booked' });
-    }
-
-    // Create appointment
-    const appointment = new Appointment({
-      patientId,
-      doctorId,
+    await mailer.sendAppointmentConfirmation(
+      appointment.patientId.email,
+      appointment.patientId.fullName,
+      doctor.fullName,
       appointmentDate,
-      timeSlot,
-      consultationType,
-      symptoms,
-      notes,
-      payment: {
-        amount: doctor.doctorProfile?.consultationFee || 0,
-        status: 'pending',
-        paymentMethod,
-      },
-      createdBy: req.user.id,
-    });
-
-    await appointment.save();
-
-    // Populate for response
-    await appointment.populate('patientId', 'fullName email phone');
-    await appointment.populate('doctorId', 'fullName email doctorProfile');
-
-    // Send appointment confirmation email
-    try {
-      await mailer.sendAppointmentConfirmation(
-        appointment.patientId.email,
-        appointment.patientId.fullName,
-        doctor.fullName,
-        appointmentDate,
-        timeSlot.start
-      );
-    } catch (emailErr) {
-      console.error('Appointment confirmation email failed:', emailErr.message);
-    }
-
-    res.status(201).json({
-      success: true,
-      message: 'Appointment booked successfully',
-      appointment,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+      timeSlot.start
+    );
+  } catch (emailErr) {
+    console.error('Appointment email failed:', emailErr.message);
   }
-};
 
-// Update Appointment Status
-exports.updateAppointmentStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status, cancellationReason, meetingLink, roomId } = req.body;
+  res.status(201).json({ success: true, message: 'अपॉइंटमेंट बुक हो गया', appointment });
+});
 
-    const appointment = await Appointment.findById(id);
-    if (!appointment) {
-      return res.status(404).json({ success: false, message: 'Appointment not found' });
-    }
+exports.updateAppointmentStatus = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { status, cancellationReason, meetingLink, roomId } = req.body;
 
-    // Authorization: only patient, doctor, or admin can update
-    const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
-                         req.user.id === appointment.patientId.toString() ||
-                         req.user.id === appointment.doctorId.toString();
+  const appointment = await Appointment.findById(id);
+  if (!appointment) throw new AppError('अपॉइंटमेंट नहीं मिला', 404);
 
-    if (!isAuthorized) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
+  const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
+    req.user.id === appointment.patientId.toString() ||
+    req.user.id === appointment.doctorId.toString();
+  if (!isAuthorized) throw new AppError('अनधिकृत', 403);
 
-    // Patients can only cancel
-    if (req.user.id === appointment.patientId.toString() && status && status !== 'cancelled') {
-      return res.status(403).json({ success: false, message: 'Patients can only cancel appointments' });
-    }
-
-    appointment.status = status || appointment.status;
-    if (cancellationReason) appointment.cancellationReason = cancellationReason;
-    if (meetingLink) appointment.meetingLink = meetingLink;
-    if (roomId) appointment.roomId = roomId;
-    appointment.updatedBy = req.user.id;
-
-    // If cancelled, record who cancelled
-    if (status === 'cancelled') {
-      appointment.cancelledBy = req.user.id;
-    }
-
-    await appointment.save();
-
-    res.json({ success: true, message: 'Appointment updated', appointment });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  if (req.user.id === appointment.patientId.toString() && status && status !== 'cancelled') {
+    throw new AppError('मरीज केवल रद्द कर सकता है', 403);
   }
-};
 
-// Get Patient's Appointments
-exports.getPatientAppointments = async (req, res) => {
-  try {
-    const patientId = req.user.id;
-    const { status, page = 1, limit = 10 } = req.query;
+  appointment.status = status || appointment.status;
+  if (cancellationReason) appointment.cancellationReason = cancellationReason;
+  if (meetingLink) appointment.meetingLink = meetingLink;
+  if (roomId) appointment.roomId = roomId;
+  appointment.updatedBy = req.user.id;
+  if (status === 'cancelled') appointment.cancelledBy = req.user.id;
 
-    const filter = { patientId };
-    if (status) filter.status = status;
+  await appointment.save();
+  res.json({ success: true, message: 'अपॉइंटमेंट अपडेट किया गया', appointment });
+});
 
-    const appointments = await Appointment.find(filter)
-      .populate('doctorId', 'fullName email doctorProfile profileImage')
-      .populate('prescriptionId')
-      .sort({ appointmentDate: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+exports.getPatientAppointments = catchAsync(async (req, res, next) => {
+  const patientId = req.user.id;
+  const { status, page = 1, limit = 10 } = req.query;
+  const filter = { patientId };
+  if (status) filter.status = status;
 
-    const total = await Appointment.countDocuments(filter);
+  const appointments = await Appointment.find(filter)
+    .populate('doctorId', 'fullName email doctorProfile profileImage')
+    .populate('prescriptionId')
+    .sort({ appointmentDate: -1 })
+    .skip((page - 1) * limit)
+    .limit(Number(limit));
 
-    res.json({
-      success: true,
-      appointments,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  const total = await Appointment.countDocuments(filter);
+  res.json({
+    success: true,
+    appointments,
+    totalPages: Math.ceil(total / limit),
+    currentPage: Number(page),
+    total,
+  });
+});
+
+exports.getDoctorAppointments = catchAsync(async (req, res, next) => {
+  const doctorId = req.user.id;
+  const { status, date, page = 1, limit = 10 } = req.query;
+  const filter = { doctorId };
+  if (status) filter.status = status;
+  if (date) {
+    const filterDate = new Date(date);
+    filter.appointmentDate = {
+      $gte: new Date(filterDate.setHours(0, 0, 0)),
+      $lt: new Date(filterDate.setHours(23, 59, 59)),
+    };
   }
-};
 
-// Get Doctor's Appointments
-exports.getDoctorAppointments = async (req, res) => {
-  try {
-    const doctorId = req.user.id;
-    const { status, date, page = 1, limit = 10 } = req.query;
+  const appointments = await Appointment.find(filter)
+    .populate('patientId', 'fullName email phone profileImage')
+    .sort({ appointmentDate: 1, 'timeSlot.start': 1 })
+    .skip((page - 1) * limit)
+    .limit(Number(limit));
 
-    const filter = { doctorId };
-    if (status) filter.status = status;
-    if (date) {
-      const filterDate = new Date(date);
-      filter.appointmentDate = {
-        $gte: new Date(filterDate.setHours(0, 0, 0)),
-        $lt: new Date(filterDate.setHours(23, 59, 59)),
-      };
-    }
+  const total = await Appointment.countDocuments(filter);
+  res.json({
+    success: true,
+    appointments,
+    totalPages: Math.ceil(total / limit),
+    currentPage: Number(page),
+    total,
+  });
+});
 
-    const appointments = await Appointment.find(filter)
-      .populate('patientId', 'fullName email phone profileImage')
-      .sort({ appointmentDate: 1, 'timeSlot.start': 1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+exports.getAppointmentById = catchAsync(async (req, res, next) => {
+  const appointment = await Appointment.findById(req.params.id)
+    .populate('patientId', 'fullName email phone profileImage')
+    .populate('doctorId', 'fullName email doctorProfile profileImage')
+    .populate('prescriptionId');
 
-    const total = await Appointment.countDocuments(filter);
+  if (!appointment) throw new AppError('अपॉइंटमेंट नहीं मिला', 404);
 
-    res.json({
-      success: true,
-      appointments,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
+    req.user.id === appointment.patientId.toString() ||
+    req.user.id === appointment.doctorId.toString();
+  if (!isAuthorized) throw new AppError('अनधिकृत', 403);
+
+  res.json({ success: true, appointment });
+});
+
+// ─── PRESCRIPTIONS ──────────────────────────────────────────────
+exports.createPrescription = catchAsync(async (req, res, next) => {
+  const doctorId = req.user.id;
+  const { patientId, appointmentId, diagnosis, medicines, tests, advice, followUpDate } = req.body;
+
+  const doctor = await User.findById(doctorId);
+  if (!doctor || doctor.role !== 'DOCTOR') throw new AppError('केवल डॉक्टर ही पर्ची बना सकते हैं', 403);
+
+  const prescription = new Prescription({
+    patientId,
+    doctorId,
+    appointmentId,
+    diagnosis,
+    medicines,
+    tests,
+    advice,
+    followUpDate,
+    createdBy: doctorId,
+    sharedWithPatient: true,
+  });
+  await prescription.save();
+
+  if (appointmentId) {
+    await Appointment.findByIdAndUpdate(appointmentId, { $set: { prescriptionId: prescription._id } });
   }
-};
+  await User.findByIdAndUpdate(patientId, { $push: { prescriptions: prescription._id } });
 
-// Get Single Appointment
-exports.getAppointmentById = async (req, res) => {
+  await prescription.populate('patientId', 'fullName email');
+  await prescription.populate('doctorId', 'fullName doctorProfile');
+
   try {
-    const appointment = await Appointment.findById(req.params.id)
-      .populate('patientId', 'fullName email phone profileImage')
-      .populate('doctorId', 'fullName email doctorProfile profileImage')
-      .populate('prescriptionId');
-
-    if (!appointment) {
-      return res.status(404).json({ success: false, message: 'Appointment not found' });
-    }
-
-    // Authorization
-    const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
-                         req.user.id === appointment.patientId.toString() ||
-                         req.user.id === appointment.doctorId.toString();
-
-    if (!isAuthorized) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
-
-    res.json({ success: true, appointment });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    await mailer.sendPrescriptionNotification(prescription.patientId.email, prescription.patientId.fullName, doctor.fullName);
+  } catch (emailErr) {
+    console.error('Prescription email failed:', emailErr.message);
   }
-};
 
-// ======================
-// PRESCRIPTIONS
-// ======================
+  res.status(201).json({ success: true, message: 'पर्ची बना दी गई', prescription });
+});
 
-// Create Prescription
-exports.createPrescription = async (req, res) => {
-  try {
-    const doctorId = req.user.id;
-    const { patientId, appointmentId, diagnosis, medicines, tests, advice, followUpDate } = req.body;
+exports.getPatientPrescriptions = catchAsync(async (req, res, next) => {
+  const patientId = req.params.patientId || req.user.id;
+  const { page = 1, limit = 10 } = req.query;
 
-    // Verify doctor
-    const doctor = await User.findById(doctorId);
-    if (!doctor || doctor.role !== 'DOCTOR') {
-      return res.status(403).json({ success: false, message: 'Only doctors can create prescriptions' });
-    }
+  if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'DOCTOR' && req.user.id !== patientId) {
+    throw new AppError('अनधिकृत', 403);
+  }
 
-    const prescription = new Prescription({
-      patientId,
-      doctorId,
-      appointmentId,
-      diagnosis,
-      medicines,
-      tests,
-      advice,
-      followUpDate,
-      createdBy: doctorId,
-      sharedWithPatient: true,
-    });
+  const prescriptions = await Prescription.find({ patientId })
+    .populate('doctorId', 'fullName doctorProfile')
+    .populate('appointmentId', 'appointmentDate consultationType')
+    .sort({ prescriptionDate: -1 })
+    .skip((page - 1) * limit)
+    .limit(Number(limit));
 
-    await prescription.save();
+  const total = await Prescription.countDocuments({ patientId });
+  res.json({
+    success: true,
+    prescriptions,
+    totalPages: Math.ceil(total / limit),
+    currentPage: Number(page),
+    total,
+  });
+});
 
-    // If appointment exists, link prescription
-    if (appointmentId) {
-      await Appointment.findByIdAndUpdate(appointmentId, {
-        $set: { prescriptionId: prescription._id },
+exports.getPrescriptionById = catchAsync(async (req, res, next) => {
+  const prescription = await Prescription.findById(req.params.id)
+    .populate('patientId', 'fullName email phone dob gender')
+    .populate('doctorId', 'fullName doctorProfile profileImage');
+
+  if (!prescription) throw new AppError('पर्ची नहीं मिली', 404);
+
+  const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
+    req.user.id === prescription.patientId.toString() ||
+    req.user.id === prescription.doctorId.toString();
+  if (!isAuthorized) throw new AppError('अनधिकृत', 403);
+
+  res.json({ success: true, prescription });
+});
+
+// ─── HEALTH RECORDS ─────────────────────────────────────────────
+exports.addHealthRecord = catchAsync(async (req, res, next) => {
+  const { patientId, recordType, title, description, date, doctorId, hospitalName, vitalSigns, labResults, isPrivate, tags } = req.body;
+  const targetPatientId = patientId || req.user.id;
+
+  if (req.user.role !== 'DOCTOR' && req.user.role !== 'SUPER_ADMIN' && req.user.id !== targetPatientId) {
+    throw new AppError('अनधिकृत', 403);
+  }
+
+  const healthRecord = new HealthRecord({
+    patientId: targetPatientId,
+    recordType,
+    title,
+    description,
+    date: date || new Date(),
+    doctorId: doctorId || (req.user.role === 'DOCTOR' ? req.user.id : null),
+    hospitalName,
+    vitalSigns,
+    labResults,
+    isPrivate,
+    tags,
+    createdBy: req.user.id,
+  });
+
+  if (req.files?.attachments) {
+    for (const file of req.files.attachments) {
+      const ext = path.extname(file.originalname);
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}${ext}`;
+      const newPath = path.join(uploadDir, fileName);
+      await fs.rename(file.path, newPath);
+      healthRecord.attachments.push({
+        fileUrl: `/uploads/healthcare/${fileName}`,
+        fileName: file.originalname,
+        fileType: file.mimetype,
       });
     }
-
-    // Also add to user's embedded prescriptions for quick access
-    await User.findByIdAndUpdate(patientId, {
-      $push: { prescriptions: prescription._id },
-    });
-
-    await prescription.populate('patientId', 'fullName email');
-    await prescription.populate('doctorId', 'fullName doctorProfile');
-
-    // Send prescription notification email
-    try {
-      await mailer.sendPrescriptionNotification(
-        prescription.patientId.email,
-        prescription.patientId.fullName,
-        doctor.fullName
-      );
-    } catch (emailErr) {
-      console.error('Prescription notification email failed:', emailErr.message);
-    }
-
-    res.status(201).json({
-      success: true,
-      message: 'Prescription created',
-      prescription,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
   }
-};
 
-// Get Patient's Prescriptions
-exports.getPatientPrescriptions = async (req, res) => {
-  try {
-    const patientId = req.params.patientId || req.user.id;
-    const { page = 1, limit = 10 } = req.query;
+  await healthRecord.save();
 
-    // Authorization: patient themselves or doctor/admin
-    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'DOCTOR' && req.user.id !== patientId) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
-
-    const prescriptions = await Prescription.find({ patientId })
-      .populate('doctorId', 'fullName doctorProfile')
-      .populate('appointmentId', 'appointmentDate consultationType')
-      .sort({ prescriptionDate: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await Prescription.countDocuments({ patientId });
-
-    res.json({
-      success: true,
-      prescriptions,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-// Get Single Prescription
-exports.getPrescriptionById = async (req, res) => {
-  try {
-    const prescription = await Prescription.findById(req.params.id)
-      .populate('patientId', 'fullName email phone dob gender')
-      .populate('doctorId', 'fullName doctorProfile profileImage');
-
-    if (!prescription) {
-      return res.status(404).json({ success: false, message: 'Prescription not found' });
-    }
-
-    // Authorization
-    const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
-                         req.user.id === prescription.patientId.toString() ||
-                         req.user.id === prescription.doctorId.toString();
-
-    if (!isAuthorized) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
-
-    res.json({ success: true, prescription });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-// ======================
-// HEALTH RECORDS
-// ======================
-
-// Add Health Record
-exports.addHealthRecord = async (req, res) => {
-  try {
-    const { patientId, recordType, title, description, date, doctorId, hospitalName, vitalSigns, labResults, isPrivate, tags } = req.body;
-    const targetPatientId = patientId || req.user.id;
-
-    // Authorization: patient can add own records, doctors can add for patients
-    if (req.user.role !== 'DOCTOR' && req.user.role !== 'SUPER_ADMIN' && req.user.id !== targetPatientId) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
-
-    const healthRecord = new HealthRecord({
-      patientId: targetPatientId,
-      recordType,
-      title,
-      description,
-      date: date || new Date(),
-      doctorId: doctorId || (req.user.role === 'DOCTOR' ? req.user.id : null),
-      hospitalName,
-      vitalSigns,
-      labResults,
-      isPrivate,
-      tags,
-      createdBy: req.user.id,
-    });
-
-    // Handle file uploads
-    if (req.files && req.files.attachments) {
-      for (const file of req.files.attachments) {
-        const ext = path.extname(file.originalname);
-        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2)}${ext}`;
-        const newPath = path.join(uploadDir, fileName);
-        await fs.rename(file.path, newPath);
-        healthRecord.attachments.push({
-          fileUrl: `/uploads/healthcare/${fileName}`,
-          fileName: file.originalname,
-          fileType: file.mimetype,
-        });
-      }
-    }
-
-    await healthRecord.save();
-
-    // Also add to user's embedded health records
-    await User.findByIdAndUpdate(targetPatientId, {
-      $push: {
-        healthRecords: {
-          recordType,
-          title,
-          description,
-          fileUrl: healthRecord.attachments[0]?.fileUrl,
-          date: healthRecord.date,
-          doctorId: healthRecord.doctorId,
-        },
+  await User.findByIdAndUpdate(targetPatientId, {
+    $push: {
+      healthRecords: {
+        recordType,
+        title,
+        description,
+        fileUrl: healthRecord.attachments[0]?.fileUrl,
+        date: healthRecord.date,
+        doctorId: healthRecord.doctorId,
       },
-    });
+    },
+  });
 
-    res.status(201).json({
-      success: true,
-      message: 'Health record added',
-      healthRecord,
-    });
-  } catch (error) {
-    // Cleanup uploaded files if error
-    if (req.files) {
-      for (const file of req.files.attachments || []) {
-        await fs.unlink(file.path).catch(() => {});
-      }
-    }
-    res.status(500).json({ success: false, error: error.message });
+  res.status(201).json({ success: true, message: 'हेल्थ रिकॉर्ड जोड़ा गया', healthRecord });
+});
+
+exports.getPatientHealthRecords = catchAsync(async (req, res, next) => {
+  const patientId = req.params.patientId || req.user.id;
+  const { recordType, page = 1, limit = 20 } = req.query;
+
+  if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'DOCTOR' && req.user.id !== patientId) {
+    throw new AppError('अनधिकृत', 403);
   }
-};
 
-// Get Patient's Health Records
-exports.getPatientHealthRecords = async (req, res) => {
-  try {
-    const patientId = req.params.patientId || req.user.id;
-    const { recordType, page = 1, limit = 20 } = req.query;
+  const filter = { patientId };
+  if (recordType) filter.recordType = recordType;
 
-    // Authorization
-    if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'DOCTOR' && req.user.id !== patientId) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
-
-    const filter = { patientId };
-    if (recordType) filter.recordType = recordType;
-
-    // Doctors can only see non-private unless they are the attending doctor
-    if (req.user.role === 'DOCTOR' && req.user.id !== patientId) {
-      filter.$or = [{ isPrivate: false }, { doctorId: req.user.id }];
-    }
-
-    const records = await HealthRecord.find(filter)
-      .populate('doctorId', 'fullName doctorProfile')
-      .sort({ date: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const total = await HealthRecord.countDocuments(filter);
-
-    res.json({
-      success: true,
-      records,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  if (req.user.role === 'DOCTOR' && req.user.id !== patientId) {
+    filter.$or = [{ isPrivate: false }, { doctorId: req.user.id }];
   }
-};
 
-// Get Single Health Record
-exports.getHealthRecordById = async (req, res) => {
-  try {
-    const record = await HealthRecord.findById(req.params.id)
-      .populate('patientId', 'fullName email')
-      .populate('doctorId', 'fullName doctorProfile');
+  const records = await HealthRecord.find(filter)
+    .populate('doctorId', 'fullName doctorProfile')
+    .sort({ date: -1 })
+    .skip((page - 1) * limit)
+    .limit(Number(limit));
 
-    if (!record) {
-      return res.status(404).json({ success: false, message: 'Record not found' });
-    }
+  const total = await HealthRecord.countDocuments(filter);
+  res.json({
+    success: true,
+    records,
+    totalPages: Math.ceil(total / limit),
+    currentPage: Number(page),
+    total,
+  });
+});
 
-    // Authorization
-    const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
-                         req.user.id === record.patientId.toString() ||
-                         (req.user.role === 'DOCTOR' && (!record.isPrivate || req.user.id === record.doctorId?.toString()));
+exports.getHealthRecordById = catchAsync(async (req, res, next) => {
+  const record = await HealthRecord.findById(req.params.id)
+    .populate('patientId', 'fullName email')
+    .populate('doctorId', 'fullName doctorProfile');
+  if (!record) throw new AppError('रिकॉर्ड नहीं मिला', 404);
 
-    if (!isAuthorized) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
+  const isAuthorized = req.user.role === 'SUPER_ADMIN' ||
+    req.user.id === record.patientId.toString() ||
+    (req.user.role === 'DOCTOR' && (!record.isPrivate || req.user.id === record.doctorId?.toString()));
+  if (!isAuthorized) throw new AppError('अनधिकृत', 403);
 
-    res.json({ success: true, record });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  res.json({ success: true, record });
+});
+
+exports.deleteHealthRecord = catchAsync(async (req, res, next) => {
+  const record = await HealthRecord.findById(req.params.id);
+  if (!record) throw new AppError('रिकॉर्ड नहीं मिला', 404);
+
+  if (req.user.role !== 'SUPER_ADMIN' && req.user.id !== record.patientId.toString()) {
+    throw new AppError('अनधिकृत', 403);
   }
-};
 
-// Delete Health Record
-exports.deleteHealthRecord = async (req, res) => {
-  try {
-    const record = await HealthRecord.findById(req.params.id);
-    if (!record) {
-      return res.status(404).json({ success: false, message: 'Record not found' });
-    }
-
-    // Only patient themselves or admin can delete
-    if (req.user.role !== 'SUPER_ADMIN' && req.user.id !== record.patientId.toString()) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
-
-    // Delete attached files
-    for (const attachment of record.attachments) {
-      const filePath = path.join(__dirname, '..', attachment.fileUrl);
-      await fs.unlink(filePath).catch(() => {});
-    }
-
-    await HealthRecord.findByIdAndDelete(req.params.id);
-
-    // Also remove from user's embedded array
-    await User.findByIdAndUpdate(record.patientId, {
-      $pull: { healthRecords: { _id: record._id } },
-    });
-
-    res.json({ success: true, message: 'Health record deleted' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  for (const attachment of record.attachments) {
+    const filePath = path.join(__dirname, '..', attachment.fileUrl);
+    await fs.unlink(filePath).catch(() => {});
   }
-};
 
-// ======================
-// DOCTOR SEARCH (ONLY VERIFIED)
-// ======================
-exports.searchDoctors = async (req, res) => {
-  try {
-    const { specialization, state, district, page = 1, limit = 10 } = req.query;
+  await HealthRecord.findByIdAndDelete(req.params.id);
+  await User.findByIdAndUpdate(record.patientId, { $pull: { healthRecords: { _id: record._id } } });
 
-    const filter = {
-      role: 'DOCTOR',
-      isVerified: true,
-      isDeleted: false,
-      'doctorVerification.verificationStatus': 'approved'    // 🆕 only verified doctors appear
-    };
-    if (specialization) filter['doctorProfile.specialization'] = { $regex: specialization, $options: 'i' };
-    if (state) filter.state = state;
-    if (district) filter.district = district;
+  res.json({ success: true, message: 'रिकॉर्ड हटा दिया गया' });
+});
 
-    const doctors = await User.find(filter)
-      .select('fullName email phone profileImage doctorProfile state district')
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .sort({ 'doctorProfile.experienceYears': -1 });
+// ─── DOCTOR SEARCH & VERIFICATION ───────────────────────────────
+exports.searchDoctors = catchAsync(async (req, res, next) => {
+  const { specialization, state, district, page = 1, limit = 10 } = req.query;
+  const filter = {
+    role: 'DOCTOR',
+    isVerified: true,
+    isDeleted: false,
+    'doctorVerification.verificationStatus': 'approved',
+  };
+  if (specialization) filter['doctorProfile.specialization'] = { $regex: specialization, $options: 'i' };
+  if (state) filter.state = state;
+  if (district) filter.district = district;
 
-    const total = await User.countDocuments(filter);
+  const doctors = await User.find(filter)
+    .select('fullName email phone profileImage doctorProfile state district')
+    .sort({ 'doctorProfile.experienceYears': -1 })
+    .skip((page - 1) * limit)
+    .limit(Number(limit));
 
-    res.json({
-      success: true,
-      doctors,
-      totalPages: Math.ceil(total / limit),
-      currentPage: page,
-      total,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  const total = await User.countDocuments(filter);
+  res.json({
+    success: true,
+    doctors,
+    totalPages: Math.ceil(total / limit),
+    currentPage: Number(page),
+    total,
+  });
+});
+
+exports.orderFromPrescription = catchAsync(async (req, res, next) => {
+  const prescription = await Prescription.findById(req.params.id);
+  if (!prescription) throw new AppError('पर्ची नहीं मिली', 404);
+
+  if (req.user.id !== prescription.patientId.toString() && req.user.role !== 'SUPER_ADMIN') {
+    throw new AppError('अनधिकृत', 403);
   }
-};
 
-// ======================
-// 🆕 ORDER FROM PRESCRIPTION
-// ======================
-exports.orderFromPrescription = async (req, res) => {
-  try {
-    const prescription = await Prescription.findById(req.params.id);
-    if (!prescription) return res.status(404).json({ success: false, message: 'Prescription not found' });
-
-    // Authorization: patient or admin
-    if (req.user.id !== prescription.patientId.toString() && req.user.role !== 'SUPER_ADMIN') {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
+  const orderItems = [];
+  for (const med of prescription.medicines) {
+    const medicine = await Medicine.findOne({ name: med.name });
+    if (medicine) {
+      orderItems.push({
+        medicine: medicine._id,
+        name: medicine.name,
+        quantity: 1,
+        price: medicine.price,
+      });
     }
-
-    // Build order items from prescribed medicines
-    const orderItems = [];
-    for (const med of prescription.medicines) {
-      const medicine = await Medicine.findOne({ name: med.name });
-      if (medicine) {
-        orderItems.push({
-          medicine: medicine._id,
-          name: medicine.name,
-          quantity: 1,   // default quantity (you can later adjust by duration)
-          price: medicine.price,
-        });
-      }
-    }
-
-    if (orderItems.length === 0) {
-      return res.status(400).json({ success: false, message: 'No matching medicines found in catalogue' });
-    }
-
-    res.json({
-      success: true,
-      message: 'Medicines ready to add to cart',
-      items: orderItems,
-      prescriptionId: prescription._id,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
   }
-};
+  if (orderItems.length === 0) throw new AppError('कोई मेल खाने वाली दवा नहीं मिली', 400);
 
-// ======================
-// 🆕 DOCTOR VERIFICATION (ADMIN)
-// ======================
+  res.json({ success: true, items: orderItems, prescriptionId: prescription._id });
+});
 
-// GET all pending doctor verifications
-exports.getPendingDoctors = async (req, res) => {
-  try {
-    const doctors = await User.find({
-      role: 'DOCTOR',
-      'doctorVerification.verificationStatus': 'pending'
-    }).select('fullName email phone doctorProfile doctorVerification');
-    res.json({ success: true, doctors });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+exports.getPendingDoctors = catchAsync(async (req, res, next) => {
+  const doctors = await User.find({
+    role: 'DOCTOR',
+    'doctorVerification.verificationStatus': 'pending',
+  }).select('fullName email phone doctorProfile doctorVerification');
+  res.json({ success: true, doctors });
+});
+
+exports.verifyDoctor = catchAsync(async (req, res, next) => {
+  const doctor = await User.findById(req.params.doctorId);
+  if (!doctor || doctor.role !== 'DOCTOR') throw new AppError('डॉक्टर नहीं मिले', 404);
+
+  doctor.doctorVerification.verificationStatus = 'approved';
+  doctor.doctorVerification.verifiedBy = req.user.id;
+  doctor.doctorVerification.verificationDate = new Date();
+  await doctor.save();
+
+  try { await mailer.sendDoctorVerificationApproved(doctor.email, doctor.fullName); } catch (e) {}
+
+  res.json({ success: true, message: 'डॉक्टर सत्यापित' });
+});
+
+exports.rejectDoctor = catchAsync(async (req, res, next) => {
+  const { reason } = req.body;
+  const doctor = await User.findById(req.params.doctorId);
+  if (!doctor || doctor.role !== 'DOCTOR') throw new AppError('डॉक्टर नहीं मिले', 404);
+
+  doctor.doctorVerification.verificationStatus = 'rejected';
+  doctor.doctorVerification.rejectionReason = reason || 'कोई कारण नहीं';
+  await doctor.save();
+  res.json({ success: true, message: 'डॉक्टर अस्वीकृत' });
+});
+
+// ─── DASHBOARD & PATIENTS ───────────────────────────────────────
+exports.getDoctorDashboard = catchAsync(async (req, res, next) => {
+  const doctorId = req.user.id;
+
+  const [totalAppointments, patientIds, totalPrescriptions, recentAppointments, revenueData] = await Promise.all([
+    Appointment.countDocuments({ doctorId }),
+    Appointment.distinct('patientId', { doctorId }),
+    Prescription.countDocuments({ doctorId }),
+    Appointment.find({ doctorId }).sort({ appointmentDate: -1 }).limit(5)
+      .populate('patientId', 'fullName email phone profileImage')
+      .lean(),
+    Appointment.aggregate([
+      { $match: { doctorId: new mongoose.Types.ObjectId(doctorId), status: 'completed' } },
+      { $group: { _id: null, totalRevenue: { $sum: '$payment.amount' } } },
+    ]),
+  ]);
+
+  res.json({
+    success: true,
+    stats: {
+      totalAppointments,
+      totalPatients: patientIds.length,
+      totalPrescriptions,
+      totalRevenue: revenueData[0]?.totalRevenue || 0,
+    },
+    recentAppointments,
+  });
+});
+
+exports.getDoctorPatients = catchAsync(async (req, res, next) => {
+  const doctorId = req.user.id;
+  const { search, page = 1, limit = 20 } = req.query;
+
+  const patientIds = await Appointment.distinct('patientId', { doctorId });
+  let filter = { _id: { $in: patientIds } };
+  if (search) {
+    filter.$or = [
+      { fullName: { $regex: search, $options: 'i' } },
+      { email: { $regex: search, $options: 'i' } },
+      { phone: { $regex: search, $options: 'i' } },
+    ];
   }
-};
 
-// Approve a doctor
-exports.verifyDoctor = async (req, res) => {
-  try {
-    const doctor = await User.findById(req.params.doctorId);
-    if (!doctor || doctor.role !== 'DOCTOR') {
-      return res.status(404).json({ success: false, message: 'Doctor not found' });
-    }
-    doctor.doctorVerification.verificationStatus = 'approved';
-    doctor.doctorVerification.verifiedBy = req.user.id;
-    doctor.doctorVerification.verificationDate = new Date();
-    await doctor.save();
+  const patients = await User.find(filter)
+    .select('fullName email phone profileImage doctorProfile')
+    .skip((page - 1) * limit)
+    .limit(Number(limit))
+    .lean();
 
-    // Optional: send approval email
-    try {
-      await mailer.sendDoctorVerificationApproved(doctor.email, doctor.fullName);
-    } catch(e) { console.log('Email error:', e.message); }
-
-    res.json({ success: true, message: 'Doctor verified successfully' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-
-exports.getDoctorDashboard = async (req, res) => {
-  try {
-    const doctorId = req.user.id;
-
-    const [totalAppointments, patientIds, totalPrescriptions, recentAppointments] =
-      await Promise.all([
-        Appointment.countDocuments({ doctorId }),
-        Appointment.distinct('patientId', { doctorId }),
-        Prescription.countDocuments({ doctorId }),
-        Appointment.find({ doctorId })
-          .sort({ appointmentDate: -1 })
-          .limit(5)
-          .populate('patientId', 'fullName email phone profileImage')
-          .lean(),
-      ]);
-
-    // Revenue from completed appointments
-    const revenueData = await Appointment.aggregate([
-      {
-        $match: {
-          doctorId: mongoose.Types.ObjectId(doctorId),
-          status: 'completed',
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalRevenue: { $sum: '$payment.amount' },
-        },
-      },
-    ]);
-    const totalRevenue = revenueData[0]?.totalRevenue || 0;
-
-    res.json({
-      success: true,
-      stats: {
-        totalAppointments,
-        totalPatients: patientIds.length,
-        totalPrescriptions,
-        totalRevenue,
-      },
-      recentAppointments,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-
-// ======================
-// 🆕 DOCTOR PATIENTS LIST
-// ======================
-exports.getDoctorPatients = async (req, res) => {
-  try {
-    const doctorId = req.user.id;
-    const { search, page = 1, limit = 20 } = req.query;
-
-    // Get unique patient IDs from appointments
-    const patientIds = await Appointment.distinct('patientId', { doctorId });
-
-    let filter = { _id: { $in: patientIds } };
-    if (search) {
-      filter.$or = [
-        { fullName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-      ];
-    }
-
-    const patients = await User.find(filter)
-      .select('fullName email phone profileImage doctorProfile')
-      .skip((page - 1) * limit)
-      .limit(Number(limit))
-      .lean();
-
-    const total = await User.countDocuments(filter);
-
-    res.json({
-      success: true,
-      patients,
-      totalPages: Math.ceil(total / limit),
-      currentPage: Number(page),
-      total,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
-// Reject a doctor
-exports.rejectDoctor = async (req, res) => {
-  try {
-    const { reason } = req.body;
-    const doctor = await User.findById(req.params.doctorId);
-    if (!doctor || doctor.role !== 'DOCTOR') {
-      return res.status(404).json({ success: false, message: 'Doctor not found' });
-    }
-    doctor.doctorVerification.verificationStatus = 'rejected';
-    doctor.doctorVerification.rejectionReason = reason || 'No reason provided';
-    await doctor.save();
-    res.json({ success: true, message: 'Doctor rejected' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
+  const total = await User.countDocuments(filter);
+  res.json({
+    success: true,
+    patients,
+    totalPages: Math.ceil(total / limit),
+    currentPage: Number(page),
+    total,
+  });
+});

@@ -1,51 +1,61 @@
+// routes/ad.routes.js
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const adController = require('../controllers/ad.controller');
-const { protect, authorize } = require('../middleware');
+const { protect, restrictTo } = require('../middleware');  // restrictTo is same as authorize
+const validate = require('../middleware/validate');
+const { body, param } = require('express-validator');
 
-// Configure multer for ad media uploads
+// Multer config
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const dir = path.join(__dirname, '../uploads/ads');
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        cb(null, dir);
-    },
-    filename: (req, file, cb) => {
-        const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-        cb(null, unique + path.extname(file.originalname));
-    },
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '../uploads/ads');
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, unique + path.extname(file.originalname));
+  },
 });
-
 const upload = multer({
-    storage,
-    limits: { fileSize: 20 * 1024 * 1024 }, // 20MB for ads
-    fileFilter: (req, file, cb) => {
-        if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
-            cb(null, true);
-        } else {
-            cb(new Error('Only images and videos are allowed for ads'));
-        }
-    },
+  storage,
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) cb(null, true);
+    else cb(new Error('केवल इमेज/वीडियो अपलोड करें'), false);
+  },
 });
 
-// ========== USER ROUTES (For displaying ads in feed) ==========
-router.get('/feed-ad', protect, adController.getFeedAd);        // Get a single ad for feed insertion
+// Validators
+const createCampaignValidator = [
+  body('businessName').notEmpty().withMessage('व्यवसाय का नाम आवश्यक'),
+  body('targetUrl').notEmpty().withMessage('टारगेट URL आवश्यक'),
+  body('totalBudget').isNumeric().withMessage('कुल बजट संख्या हो'),
+  body('bidAmount').isNumeric().withMessage('बिड राशि संख्या हो'),
+  body('endDate').notEmpty().withMessage('समाप्ति तिथि आवश्यक'),
+];
+
+// User routes
+router.get('/feed-ad', protect, adController.getFeedAd);
 router.post('/track-impression', protect, adController.trackImpression);
 router.post('/track-click', protect, adController.trackClick);
 
-// ========== ADMIN ROUTES (For managing ad campaigns) ==========
-router.post('/campaigns', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), upload.array('media', 5), adController.createCampaign);
-router.get('/campaigns', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adController.getCampaigns);
-router.get('/campaigns/:id', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adController.getCampaign);
-router.put('/campaigns/:id', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), upload.array('media', 5), adController.updateCampaign);
-router.delete('/campaigns/:id', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adController.deleteCampaign);
-router.patch('/campaigns/:id/status', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adController.updateCampaignStatus);
+// Admin routes
+const adminAuth = [protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR')];
+
+router.post('/campaigns', ...adminAuth, upload.array('media', 5), validate(createCampaignValidator), adController.createCampaign);
+router.get('/campaigns', ...adminAuth, adController.getCampaigns);
+router.get('/campaigns/:id', ...adminAuth, adController.getCampaign);
+router.put('/campaigns/:id', ...adminAuth, upload.array('media', 5), adController.updateCampaign);
+router.delete('/campaigns/:id', ...adminAuth, adController.deleteCampaign);
+router.patch('/campaigns/:id/status', ...adminAuth, adController.updateCampaignStatus);
 
 // Analytics
-router.get('/analytics', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adController.getAnalytics);
-router.get('/analytics/campaign/:campaignId', protect, authorize('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adController.getCampaignAnalytics);
+router.get('/analytics', ...adminAuth, adController.getAnalytics);
+router.get('/analytics/campaign/:campaignId', ...adminAuth, adController.getCampaignAnalytics);
 
 module.exports = router;

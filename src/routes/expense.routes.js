@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const expenseController = require('../controllers/expense.controller');
-const { protect, restrictTo } = require('../middleware/auth.middleware');
+const { protect, restrictTo } = require('../middleware');
 
 router.post('/', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), expenseController.createExpense);
 router.get('/', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), expenseController.getExpenses);

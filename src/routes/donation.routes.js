@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const donationController = require('../controllers/donation.controller');
-const { protect, restrictTo } = require('../middleware/auth.middleware');
+const { protect, restrictTo } = require('../middleware');
 
 // User routes
 router.post('/', protect, donationController.createDonation);

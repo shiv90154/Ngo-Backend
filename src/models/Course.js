@@ -13,5 +13,8 @@ const courseSchema = new mongoose.Schema({
   totalEnrolled: { type: Number, default: 0 },
   createdAt: { type: Date, default: Date.now }
 });
+courseSchema.index({ instructor: 1 });
+courseSchema.index({ category: 1 });
+courseSchema.index({ isPublished: 1 });
 
 module.exports = mongoose.model('Course', courseSchema);

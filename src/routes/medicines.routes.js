@@ -1,24 +1,24 @@
 const express = require('express');
 const router = express.Router();
 const medicineController = require('../controllers/medicine.controller');
-const { protect, authorize } = require('../middleware');
+const { protect, restrictTo } = require('../middleware'); // ✅ changed authorize → restrictTo
 
-// Public (authenticated) – catalogue
+// Public catalogue (authenticated)
 router.get('/', protect, medicineController.getMedicines);
 router.get('/search', protect, medicineController.searchMedicines);
+router.get('/orders/my', protect, medicineController.getMyOrders);
+router.get('/orders/all', protect, restrictTo('SUPER_ADMIN'), medicineController.getAllOrders);
+router.get('/orders/:id', protect, medicineController.getOrderById);
 router.get('/:id', protect, medicineController.getMedicineById);
 
 // Admin management
-router.post('/', protect, authorize('SUPER_ADMIN'), medicineController.addMedicine);
-router.put('/:id', protect, authorize('SUPER_ADMIN'), medicineController.updateMedicine);
-router.delete('/:id', protect, authorize('SUPER_ADMIN'), medicineController.deleteMedicine);
-router.patch('/:id/stock', protect, authorize('SUPER_ADMIN'), medicineController.updateStock);
+router.post('/', protect, restrictTo('SUPER_ADMIN'), medicineController.addMedicine);
+router.put('/:id', protect, restrictTo('SUPER_ADMIN'), medicineController.updateMedicine);
+router.delete('/:id', protect, restrictTo('SUPER_ADMIN'), medicineController.deleteMedicine);
+router.patch('/:id/stock', protect, restrictTo('SUPER_ADMIN'), medicineController.updateStock);
 
 // Orders
-// Orders
 router.post('/order', protect, medicineController.createOrder);
-router.get('/orders/my', protect, medicineController.getMyOrders);
-router.get('/orders/all', protect, authorize('SUPER_ADMIN'), medicineController.getAllOrders); // ⬅️ pahle
-router.get('/orders/:id', protect, medicineController.getOrderById);
-router.patch('/orders/:id/status', protect, authorize('SUPER_ADMIN'), medicineController.updateOrderStatus);
+router.patch('/orders/:id/status', protect, restrictTo('SUPER_ADMIN'), medicineController.updateOrderStatus);
+
 module.exports = router;

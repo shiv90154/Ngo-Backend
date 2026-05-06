@@ -1,7 +1,7 @@
 // routes/notification.routes.js
 const express = require('express');
 const router = express.Router();
-const { protect, restrictTo } = require('../middleware/auth.middleware');
+const { protect, restrictTo } = require('../middleware');
 const notificationController = require('../controllers/notification.controller');
 
 // All routes require authentication

@@ -1,76 +1,47 @@
+// routes/education.routes.js
 const express = require('express');
 const router = express.Router();
-const { protect, restrictTo } = require('../middleware/auth.middleware');
+const { protect, restrictTo } = require('../middleware');
 const educationController = require('../controllers/education.controller');
 const upload = require('../middleware/upload');
+const validate = require('../middleware/validate');
+const eduVal = require('../validators/educationValidator');
 
-// 公开路由
+// ─── पब्लिक रूट्स ───
 router.get('/courses', educationController.getPublishedCourses);
 router.get('/courses/:id', protect, educationController.getCourseDetails);
 
-// 学生路由
-router.get('/my-courses', protect, educationController.getMyEnrollments); // 🆕 新增
-router.post('/courses/:id/enroll', protect, educationController.enrollCourse);
-router.post('/courses/:courseId/lessons/complete', protect, educationController.markLessonComplete);
+// ─── स्टूडेंट ───
+router.get('/my-courses', protect, educationController.getMyEnrollments);
+router.post(
+  '/courses/:id/enroll',
+  protect,
+  validate(eduVal.enrollCourse),
+  educationController.enrollCourse
+);
+router.post(
+  '/courses/:courseId/lessons/complete',
+  protect,
+  validate(eduVal.markLessonComplete),
+  educationController.markLessonComplete
+);
 router.get('/tests/:testId/start', protect, educationController.startTest);
 router.post('/tests/submit', protect, educationController.submitTest);
-router.get('/certificates', protect, educationController.getMyCertificates); // 🆕 新增（如有需要）
+router.get('/certificates', protect, educationController.getMyCertificates);
 
-// 教师/管理员路由
-router.post(
-  '/courses',
-  protect,
-  restrictTo('TEACHER', 'SUPER_ADMIN'),
-  upload.single('thumbnail'),
-  educationController.createCourse
-);
-router.get(
-  '/instructor/courses',
-  protect,
-  restrictTo('TEACHER', 'SUPER_ADMIN'),
-  educationController.getMyCourses
-);
-router.put(
-  '/courses/:id',
-  protect,
-  restrictTo('TEACHER', 'SUPER_ADMIN'),
-  educationController.updateCourse
-);
-router.delete(
-  '/courses/:id',
-  protect,
-  restrictTo('TEACHER', 'SUPER_ADMIN'),
-  educationController.deleteCourse
-);
-router.post(
-  '/chapters',
-  protect,
-  restrictTo('TEACHER', 'SUPER_ADMIN'),
-  educationController.addChapter
-);
-router.post(
-  '/lessons',
-  protect,
-  restrictTo('TEACHER', 'SUPER_ADMIN'),
-  educationController.addLesson
-);
-router.post(
-  '/tests',
-  protect,
-  restrictTo('TEACHER', 'SUPER_ADMIN'),
-  educationController.createTest
-);
-router.post(
-  '/questions',
-  protect,
-  restrictTo('TEACHER', 'SUPER_ADMIN'),
-  educationController.addQuestion
-);
-router.get(
-  '/instructor/dashboard',
-  protect,
-  restrictTo('TEACHER', 'SUPER_ADMIN'),
-  educationController.getInstructorDashboard
-);
+// ─── टीचर / एडमिन ───
+const instructorAuth = [protect, restrictTo('TEACHER', 'SUPER_ADMIN')];
+
+router.post('/courses', ...instructorAuth, upload.single('thumbnail'), validate(eduVal.createCourse), educationController.createCourse);
+router.get('/instructor/courses', ...instructorAuth, educationController.getMyCourses);
+router.put('/courses/:id', ...instructorAuth, educationController.updateCourse);
+router.delete('/courses/:id', ...instructorAuth, educationController.deleteCourse);
+
+router.post('/chapters', ...instructorAuth, validate(eduVal.addChapter), educationController.addChapter);
+router.post('/lessons', ...instructorAuth, validate(eduVal.addLesson), educationController.addLesson);
+router.post('/tests', ...instructorAuth, validate(eduVal.createTest), educationController.createTest);
+router.post('/questions', ...instructorAuth, validate(eduVal.addQuestion), educationController.addQuestion);
+
+router.get('/instructor/dashboard', ...instructorAuth, educationController.getInstructorDashboard);
 
 module.exports = router;

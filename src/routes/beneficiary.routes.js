@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const beneficiaryController = require('../controllers/beneficiary.controller');
-const { protect, restrictTo } = require('../middleware/auth.middleware');
+const { protect, restrictTo } = require('../middleware');
 
 // Admin routes
 router.get('/', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), beneficiaryController.getBeneficiaries);

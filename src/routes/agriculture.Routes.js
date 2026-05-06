@@ -52,7 +52,7 @@ const {
     deleteSellerProduct
 } = require('../controllers/agriSeller.controller');
 
-const { protect } = require('../middleware/auth.middleware');
+const { protect } = require('../middleware');
 
 // ---------------- PUBLIC ----------------
 router.get('/products', getAllProducts);

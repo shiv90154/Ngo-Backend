@@ -73,7 +73,5 @@ const healthRecordSchema = new mongoose.Schema(
 
 healthRecordSchema.index({ patientId: 1, date: -1 });
 healthRecordSchema.index({ recordType: 1 });
-healthRecordSchema.index({ doctorId: 1 });
-healthRecordSchema.index({ tags: 1 });
 
 module.exports = mongoose.model('HealthRecord', healthRecordSchema);

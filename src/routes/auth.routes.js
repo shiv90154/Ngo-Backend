@@ -1,4 +1,3 @@
-// src/routes/auth.routes.js
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
@@ -6,8 +5,15 @@ const path = require('path');
 const fs = require('fs');
 
 const userController = require('../controllers/auth.controller');
-const { protect, restrictTo } = require('../middleware');
-// Configure multer for temporary file storage
+const { protect, restrictTo, rateLimiter } = require('../middleware');
+const {
+  registerValidation,
+  loginValidation,
+  otpValidation,
+  resetPasswordValidation,
+} = require('../validators/authValidator');
+
+// Multer setup
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const tempDir = path.join(__dirname, '../../temp_uploads');
@@ -19,12 +25,9 @@ const storage = multer.diskStorage({
     cb(null, `${uniqueSuffix}-${file.originalname}`);
   },
 });
-
 const upload = multer({ storage });
 
-// ======================
-// PUBLIC ROUTES (No authentication)
-// ======================
+// ====================== PUBLIC ROUTES ======================
 router.post(
   '/register',
   upload.fields([
@@ -36,19 +39,18 @@ router.post(
     { name: 'panDocument', maxCount: 1 },
     { name: 'storeLogo', maxCount: 1 },
   ]),
+  registerValidation,
   userController.register
 );
 
-router.post('/verify-otp', userController.verifyOTP);
-router.post('/resend-otp', userController.resendOTP);
-router.post('/login', userController.login);
+router.post('/verify-otp', otpValidation, rateLimiter.otpLimiter, userController.verifyOTP);
+router.post('/resend-otp', otpValidation, rateLimiter.otpLimiter, userController.resendOTP);
+router.post('/login', loginValidation, rateLimiter.loginLimiter, userController.login);
 router.post('/forgot-password', userController.forgotPassword);
-router.post('/verify-reset-otp', userController.verifyResetOtp);
-router.post('/reset-password', userController.resetPassword);
+router.post('/verify-reset-otp', otpValidation, userController.verifyResetOtp);
+router.post('/reset-password', resetPasswordValidation, userController.resetPassword);
 
-// ======================
-// PROTECTED ROUTES (Authentication required)
-// ======================
+// ====================== PROTECTED ROUTES ======================
 router.get('/profile', protect, userController.getProfile);
 router.put(
   '/profile',
@@ -57,18 +59,18 @@ router.put(
     { name: 'profileImage', maxCount: 1 },
     { name: 'profilePicture', maxCount: 1 },
     { name: 'storeLogo', maxCount: 1 },
-
   ]),
   userController.updateProfile
 );
 
-// Subordinates - two separate routes (NO OPTIONAL PARAM)
+// Subordinates
 router.get('/subordinates', protect, userController.getSubordinates);
-router.get('/subordinates/:id', protect, userController.getSubordinates);
+router.get('/subordinates/:id', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.getSubordinates);
 
+// Wallet
 router.post('/wallet', protect, userController.updateWallet);
 
-// Health Records - two separate routes
+// Health Records
 router.post('/health-records', protect, upload.single('file'), userController.addHealthRecord);
 router.post(
   '/health-records/user/:userId',
@@ -84,14 +86,9 @@ router.post('/products', protect, upload.single('image'), userController.addProd
 // Contract Farming
 router.post('/contract-farming', protect, userController.addContractFarming);
 
-// Loans - two separate routes
+// Loans
 router.post('/loans', protect, userController.addLoan);
-router.post(
-  '/loans/user/:userId',
-  protect,
-  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
-  userController.addLoan
-);
+router.post('/loans/user/:userId', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.addLoan);
 
 // CRM Clients
 router.post('/clients', protect, userController.addClient);
@@ -111,7 +108,7 @@ router.put('/mlm/payout', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTO
 // Restore user
 router.patch('/:id/restore', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.restoreUser);
 
-// Admin user management - specific routes BEFORE param routes
+// Admin user management
 router.get('/', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.getAllUsers);
 router.get('/:id', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_OFFICER'), userController.getUserById);
 router.delete('/:id', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.deleteUser);

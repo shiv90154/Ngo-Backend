@@ -2,307 +2,277 @@ const AdCampaign = require('../models/AdCampaign');
 const AdEvent = require('../models/AdEvent');
 const User = require('../models/user.model');
 const path = require('path');
-const fs = require('fs');
-const mediaController = require('./media.controller'); // Import to use shared helper
+const fs = require('fs').promises;
+const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/AppError');
+const mediaController = require('./media.controller');  // shared helpers
 
-// @desc    Get a single ad for feed insertion (uses shared helper)
-// @route   GET /api/ads/feed-ad
-// @access  Private
-exports.getFeedAd = async (req, res) => {
-    try {
-        const ad = await mediaController._getAdForFeed(
-            req.user.id,
-            req.user.role,
-            req.user.state,
-            req.user.district,
-            req.user.block
-        );
-
-        if (!ad) {
-            return res.json({ success: true, ad: null, message: 'No eligible ads' });
-        }
-
-        const adResponse = mediaController._transformAdToPost(ad);
-        res.json({ success: true, ad: adResponse });
-    } catch (error) {
-        console.error('Get feed ad error:', error);
-        res.status(500).json({ success: false, message: 'Server error', error: error.message });
-    }
+// ---------- HELPER : delete file ----------
+const deleteFile = async (filePath) => {
+  try { await fs.unlink(path.join(__dirname, '..', filePath)); } catch {}
 };
 
-// @desc    Track ad click
-// @route   POST /api/ads/track-click
-// @access  Private
-exports.trackClick = async (req, res) => {
-    try {
-        const { campaignId, adId } = req.body;
-        const actualCampaignId = campaignId || adId;
+// ---------- FEED AD ----------
+exports.getFeedAd = catchAsync(async (req, res, next) => {
+  const ad = await mediaController._getAdForFeed(
+    req.user.id,
+    req.user.role,
+    req.user.state,
+    req.user.district,
+    req.user.block
+  );
 
-        const campaign = await AdCampaign.findById(actualCampaignId);
-        if (!campaign) {
-            return res.status(404).json({ success: false, message: 'Campaign not found' });
-        }
+  if (!ad) {
+    return res.json({ success: true, ad: null, message: 'कोई विज्ञापन उपलब्ध नहीं' });
+  }
 
-        campaign.clicks += 1;
-        campaign.spentBudget += campaign.bidAmount;
-        await campaign.save();
+  const adResponse = mediaController._transformAdToPost(ad);
+  res.json({ success: true, ad: adResponse });
+});
 
-        await AdEvent.create({
-            campaignId: actualCampaignId,
-            userId: req.user.id,
-            eventType: 'click',
-            metadata: {
-                userLocation: { state: req.user.state, district: req.user.district },
-                userRole: req.user.role,
-            }
-        });
+// ---------- TRACK CLICK ----------
+exports.trackClick = catchAsync(async (req, res, next) => {
+  const { campaignId, adId } = req.body;
+  const actualId = campaignId || adId;
+  if (!actualId) throw new AppError('campaignId आवश्यक है', 400);
 
-        await User.findByIdAndUpdate(req.user.id, {
-            $push: { adsSeen: { campaignId: actualCampaignId, clicked: true, clickedAt: new Date() } }
-        });
+  const campaign = await AdCampaign.findById(actualId);
+  if (!campaign) throw new AppError('विज्ञापन नहीं मिला', 404);
 
-        res.json({ success: true, message: 'Click tracked' });
-    } catch (error) {
-        console.error('Track click error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
-    }
-};
+  campaign.clicks += 1;
+  campaign.spentBudget += campaign.bidAmount || 0;
+  await campaign.save();
 
-// @desc    Track ad impression (for manual tracking)
-// @route   POST /api/ads/track-impression
-// @access  Private
-exports.trackImpression = async (req, res) => {
-    try {
-        const { campaignId } = req.body;
+  await AdEvent.create({
+    campaignId: actualId,
+    userId: req.user.id,
+    eventType: 'click',
+    metadata: {
+      userLocation: { state: req.user.state, district: req.user.district },
+      userRole: req.user.role,
+    },
+  });
 
-        await AdEvent.create({
-            campaignId,
-            userId: req.user.id,
-            eventType: 'impression',
-            metadata: {
-                userLocation: { state: req.user.state, district: req.user.district },
-                userRole: req.user.role,
-            }
-        });
+  await User.findByIdAndUpdate(req.user.id, {
+    $push: { adsSeen: { campaignId: actualId, clicked: true, clickedAt: new Date() } },
+  });
 
-        await AdCampaign.findByIdAndUpdate(campaignId, { $inc: { impressions: 1 } });
-        res.json({ success: true, message: 'Impression tracked' });
-    } catch (error) {
-        console.error('Track impression error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
-    }
-};
+  res.json({ success: true, message: 'क्लिक दर्ज किया गया' });
+});
 
-// ========== ADMIN CONTROLLERS ==========
-exports.createCampaign = async (req, res) => {
-    try {
-        const {
-            businessName,
-            content,
-            ctaText,
-            targetUrl,
-            totalBudget,
-            bidAmount,
-            targetAudience,
-            startDate,
-            endDate,
-        } = req.body;
+// ---------- TRACK IMPRESSION ----------
+exports.trackImpression = catchAsync(async (req, res, next) => {
+  const { campaignId } = req.body;
+  if (!campaignId) throw new AppError('campaignId आवश्यक है', 400);
 
-        const media = [];
-        if (req.files && req.files.length > 0) {
-            for (const file of req.files) {
-                const fileType = file.mimetype.startsWith('image/') ? 'image' : 'video';
-                media.push({
-                    type: fileType,
-                    url: `/uploads/ads/${file.filename}`,
-                    thumbnail: fileType === 'video' ? `/uploads/ads/thumb_${file.filename}.jpg` : null,
-                });
-            }
-        }
+  await AdEvent.create({
+    campaignId,
+    userId: req.user.id,
+    eventType: 'impression',
+    metadata: {
+      userLocation: { state: req.user.state, district: req.user.district },
+      userRole: req.user.role,
+    },
+  });
 
-        const campaign = await AdCampaign.create({
-            advertiserId: req.user.id,
-            businessName,
-            content,
-            media,
-            ctaText: ctaText || 'Learn More',
-            targetUrl,
-            totalBudget: parseFloat(totalBudget),
-            bidAmount: parseFloat(bidAmount),
-            targetAudience: typeof targetAudience === 'string' ? JSON.parse(targetAudience) : targetAudience,
-            startDate: new Date(startDate),
-            endDate: new Date(endDate),
-            createdBy: req.user.id,
-        });
+  await AdCampaign.findByIdAndUpdate(campaignId, { $inc: { impressions: 1 } });
+  res.json({ success: true, message: 'इम्प्रेशन दर्ज' });
+});
 
-        res.status(201).json({ success: true, data: campaign });
-    } catch (error) {
-        console.error('Create campaign error:', error);
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
+// ---------- CREATE CAMPAIGN (ADMIN) ----------
+exports.createCampaign = catchAsync(async (req, res, next) => {
+  const {
+    businessName, content, ctaText, targetUrl,
+    totalBudget, bidAmount, targetAudience,
+    startDate, endDate,
+  } = req.body;
 
-exports.getCampaigns = async (req, res) => {
-    try {
-        const { status, page = 1, limit = 20 } = req.query;
-        const query = { isDeleted: false };
-        if (status) query.status = status;
+  if (!businessName || !targetUrl || !totalBudget || !bidAmount || !endDate) {
+    throw new AppError('सभी आवश्यक फ़ील्ड भरें', 400);
+  }
 
-        const campaigns = await AdCampaign.find(query)
-            .populate('advertiserId', 'fullName email')
-            .sort({ createdAt: -1 })
-            .limit(limit * 1)
-            .skip((page - 1) * limit);
+  const media = (req.files || []).map(file => ({
+    type: file.mimetype.startsWith('image/') ? 'image' : 'video',
+    url: `/uploads/ads/${file.filename}`,
+    thumbnail: file.mimetype.startsWith('video/') ? `/uploads/ads/thumb_${file.filename}.jpg` : undefined,
+  }));
 
-        const total = await AdCampaign.countDocuments(query);
-        res.json({ success: true, data: campaigns, total, page: parseInt(page), pages: Math.ceil(total / limit) });
-    } catch (error) {
-        console.error('Get campaigns error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
-    }
-};
+  // Parse targetAudience if string
+  let audience = targetAudience;
+  if (typeof audience === 'string') {
+    try { audience = JSON.parse(audience); } catch { throw new AppError('अमान्य targetAudience फ़ॉर्मैट', 400); }
+  }
 
-exports.getCampaign = async (req, res) => {
-    try {
-        const campaign = await AdCampaign.findById(req.params.id)
-            .populate('advertiserId', 'fullName email')
-            .populate('createdBy', 'fullName')
-            .populate('approvedBy', 'fullName');
+  const campaign = await AdCampaign.create({
+    advertiserId: req.user.id,
+    businessName,
+    content: content || '',
+    media,
+    ctaText: ctaText || 'Learn More',
+    targetUrl,
+    totalBudget: parseFloat(totalBudget),
+    bidAmount: parseFloat(bidAmount),
+    targetAudience: audience || {},
+    startDate: startDate ? new Date(startDate) : new Date(),
+    endDate: new Date(endDate),
+    createdBy: req.user.id,
+  });
 
-        if (!campaign || campaign.isDeleted) {
-            return res.status(404).json({ success: false, message: 'Campaign not found' });
-        }
-        res.json({ success: true, data: campaign });
-    } catch (error) {
-        console.error('Get campaign error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
-    }
-};
+  res.status(201).json({ success: true, data: campaign });
+});
 
-exports.updateCampaign = async (req, res) => {
-    try {
-        const campaign = await AdCampaign.findById(req.params.id);
-        if (!campaign || campaign.isDeleted) {
-            return res.status(404).json({ success: false, message: 'Campaign not found' });
-        }
+// ---------- GET CAMPAIGNS (ADMIN) ----------
+exports.getCampaigns = catchAsync(async (req, res, next) => {
+  const { status, page = 1, limit = 20 } = req.query;
+  const query = { isDeleted: false };
+  if (status) query.status = status;
 
-        const updates = req.body;
-        if (req.files && req.files.length > 0) {
-            const media = [];
-            for (const file of req.files) {
-                const fileType = file.mimetype.startsWith('image/') ? 'image' : 'video';
-                media.push({ type: fileType, url: `/uploads/ads/${file.filename}` });
-            }
-            updates.media = media;
-        }
+  const [campaigns, total] = await Promise.all([
+    AdCampaign.find(query)
+      .populate('advertiserId', 'fullName email')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit))
+      .lean(),
+    AdCampaign.countDocuments(query),
+  ]);
 
-        if (updates.targetAudience && typeof updates.targetAudience === 'string') {
-            updates.targetAudience = JSON.parse(updates.targetAudience);
-        }
+  res.json({
+    success: true,
+    data: campaigns,
+    total,
+    currentPage: Number(page),
+    totalPages: Math.ceil(total / limit),
+  });
+});
 
-        const updated = await AdCampaign.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
-        res.json({ success: true, data: updated });
-    } catch (error) {
-        console.error('Update campaign error:', error);
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
+// ---------- GET SINGLE CAMPAIGN ----------
+exports.getCampaign = catchAsync(async (req, res, next) => {
+  const campaign = await AdCampaign.findById(req.params.id)
+    .populate('advertiserId', 'fullName email')
+    .populate('createdBy', 'fullName')
+    .populate('approvedBy', 'fullName')
+    .lean();
 
-exports.deleteCampaign = async (req, res) => {
-    try {
-        await AdCampaign.findByIdAndUpdate(req.params.id, { isDeleted: true, deletedAt: new Date(), status: 'completed' });
-        res.json({ success: true, message: 'Campaign deleted' });
-    } catch (error) {
-        console.error('Delete campaign error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
-    }
-};
+  if (!campaign || campaign.isDeleted) throw new AppError('कैम्पेन नहीं मिला', 404);
+  res.json({ success: true, data: campaign });
+});
 
-exports.updateCampaignStatus = async (req, res) => {
-    try {
-        const { status } = req.body;
-        const updateData = { status };
-        if (status === 'active') {
-            updateData.approvedBy = req.user.id;
-            updateData.approvedAt = new Date();
-        }
-        const campaign = await AdCampaign.findByIdAndUpdate(req.params.id, updateData, { new: true });
-        res.json({ success: true, data: campaign });
-    } catch (error) {
-        console.error('Update status error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
-    }
-};
+// ---------- UPDATE CAMPAIGN ----------
+exports.updateCampaign = catchAsync(async (req, res, next) => {
+  const campaign = await AdCampaign.findById(req.params.id);
+  if (!campaign || campaign.isDeleted) throw new AppError('कैम्पेन नहीं मिला', 404);
 
-exports.getAnalytics = async (req, res) => {
-    try {
-        const totalCampaigns = await AdCampaign.countDocuments({ isDeleted: false });
-        const activeCampaigns = await AdCampaign.countDocuments({ status: 'active' });
-        const totalImpressions = await AdCampaign.aggregate([
-            { $match: { isDeleted: false } },
-            { $group: { _id: null, total: { $sum: '$impressions' } } }
-        ]);
-        const totalClicks = await AdCampaign.aggregate([
-            { $match: { isDeleted: false } },
-            { $group: { _id: null, total: { $sum: '$clicks' } } }
-        ]);
-        const totalSpent = await AdCampaign.aggregate([
-            { $match: { isDeleted: false } },
-            { $group: { _id: null, total: { $sum: '$spentBudget' } } }
-        ]);
+  const updates = { ...req.body };
 
-        res.json({
-            success: true,
-            data: {
-                totalCampaigns,
-                activeCampaigns,
-                totalImpressions: totalImpressions[0]?.total || 0,
-                totalClicks: totalClicks[0]?.total || 0,
-                totalSpent: totalSpent[0]?.total || 0,
-                ctr: totalImpressions[0]?.total > 0 ? ((totalClicks[0]?.total || 0) / totalImpressions[0].total * 100).toFixed(2) : 0
-            }
-        });
-    } catch (error) {
-        console.error('Get analytics error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
-    }
-};
+  // Handle media uploads
+  if (req.files && req.files.length) {
+    // Delete old media files (optional safety)
+    for (const old of campaign.media || []) await deleteFile(old.url);
 
-exports.getCampaignAnalytics = async (req, res) => {
-    try {
-        const campaign = await AdCampaign.findById(req.params.id);
-        if (!campaign) {
-            return res.status(404).json({ success: false, message: 'Campaign not found' });
-        }
+    const media = req.files.map(file => ({
+      type: file.mimetype.startsWith('image/') ? 'image' : 'video',
+      url: `/uploads/ads/${file.filename}`,
+    }));
+    updates.media = media;
+  }
 
-        const clicksByDate = await AdEvent.aggregate([
-            { $match: { campaignId: campaign._id, eventType: 'click' } },
-            { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
-            { $sort: { _id: 1 } }
-        ]);
+  if (updates.targetAudience && typeof updates.targetAudience === 'string') {
+    try { updates.targetAudience = JSON.parse(updates.targetAudience); } catch { throw new AppError('अमान्य targetAudience', 400); }
+  }
 
-        const impressionsByDate = await AdEvent.aggregate([
-            { $match: { campaignId: campaign._id, eventType: 'impression' } },
-            { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
-            { $sort: { _id: 1 } }
-        ]);
+  const updated = await AdCampaign.findByIdAndUpdate(req.params.id, updates, {
+    new: true,
+    runValidators: true,
+  });
 
-        res.json({
-            success: true,
-            data: {
-                campaign,
-                stats: {
-                    impressions: campaign.impressions,
-                    clicks: campaign.clicks,
-                    ctr: campaign.impressions > 0 ? (campaign.clicks / campaign.impressions * 100).toFixed(2) : 0,
-                    spentBudget: campaign.spentBudget,
-                    remainingBudget: campaign.totalBudget - campaign.spentBudget,
-                },
-                dailyData: { clicks: clicksByDate, impressions: impressionsByDate }
-            }
-        });
-    } catch (error) {
-        console.error('Get campaign analytics error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
-    }
-};
+  res.json({ success: true, data: updated });
+});
+
+// ---------- DELETE CAMPAIGN (SOFT) ----------
+exports.deleteCampaign = catchAsync(async (req, res, next) => {
+  await AdCampaign.findByIdAndUpdate(req.params.id, {
+    isDeleted: true,
+    deletedAt: new Date(),
+    status: 'completed',
+  });
+  res.json({ success: true, message: 'कैम्पेन हटा दिया गया' });
+});
+
+// ---------- UPDATE CAMPAIGN STATUS ----------
+exports.updateCampaignStatus = catchAsync(async (req, res, next) => {
+  const { status } = req.body;
+  if (!status) throw new AppError('status आवश्यक है', 400);
+
+  const updateData = { status };
+  if (status === 'active') {
+    updateData.approvedBy = req.user.id;
+    updateData.approvedAt = new Date();
+  }
+
+  const campaign = await AdCampaign.findByIdAndUpdate(req.params.id, updateData, { new: true });
+  if (!campaign) throw new AppError('कैम्पेन नहीं मिला', 404);
+
+  res.json({ success: true, data: campaign });
+});
+
+// ---------- ANALYTICS (GLOBAL) ----------
+exports.getAnalytics = catchAsync(async (req, res, next) => {
+  const [totalCampaigns, activeCampaigns, agg] = await Promise.all([
+    AdCampaign.countDocuments({ isDeleted: false }),
+    AdCampaign.countDocuments({ status: 'active', isDeleted: false }),
+    AdCampaign.aggregate([
+      { $match: { isDeleted: false } },
+      { $group: { _id: null, impressions: { $sum: '$impressions' }, clicks: { $sum: '$clicks' }, spent: { $sum: '$spentBudget' } } },
+    ]),
+  ]);
+
+  const stats = agg[0] || { impressions: 0, clicks: 0, spent: 0 };
+  const ctr = stats.impressions > 0 ? ((stats.clicks / stats.impressions) * 100).toFixed(2) : 0;
+
+  res.json({
+    success: true,
+    data: {
+      totalCampaigns,
+      activeCampaigns,
+      totalImpressions: stats.impressions,
+      totalClicks: stats.clicks,
+      totalSpent: stats.spent,
+      ctr,
+    },
+  });
+});
+
+// ---------- CAMPAIGN ANALYTICS ----------
+exports.getCampaignAnalytics = catchAsync(async (req, res, next) => {
+  const campaign = await AdCampaign.findById(req.params.id).lean();
+  if (!campaign) throw new AppError('कैम्पेन नहीं मिला', 404);
+
+  const [clicksByDate, impressionsByDate] = await Promise.all([
+    AdEvent.aggregate([
+      { $match: { campaignId: campaign._id, eventType: 'click' } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]),
+    AdEvent.aggregate([
+      { $match: { campaignId: campaign._id, eventType: 'impression' } },
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]),
+  ]);
+
+  res.json({
+    success: true,
+    data: {
+      campaign,
+      stats: {
+        impressions: campaign.impressions,
+        clicks: campaign.clicks,
+        ctr: campaign.impressions > 0 ? (campaign.clicks / campaign.impressions * 100).toFixed(2) : 0,
+        spentBudget: campaign.spentBudget,
+        remainingBudget: campaign.totalBudget - campaign.spentBudget,
+      },
+      dailyData: { clicks: clicksByDate, impressions: impressionsByDate },
+    },
+  });
+});

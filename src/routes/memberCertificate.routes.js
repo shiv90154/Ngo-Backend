@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const certController = require('../controllers/memberCertificate.controller');
-const { protect, restrictTo } = require('../middleware/auth.middleware');
+const { protect, restrictTo } = require('../middleware');
 
 // User
 router.get('/my', protect, certController.getMyCertificates);

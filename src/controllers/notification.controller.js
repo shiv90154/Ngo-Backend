@@ -1,4 +1,3 @@
-// controllers/notification.controller.js
 const Notification = require('../models/Notification');
 const User = require('../models/user.model');
 const Appointment = require('../models/Appointment');
@@ -305,7 +304,7 @@ exports.notifyCommissionCredited = async (commissionLog) => {
     await safeCreate({
       recipient: commissionLog.userId,
       sender: null,
-      type: 'mlm_commission',
+      type: 'commission_credited',
       metadata: {
         title: 'Commission Credited',
         message: `You have received ₹${commissionLog.amount} as commission.`,
