@@ -1,16 +1,15 @@
+// controllers/serviceRequest.controller.js
 const ServiceRequest = require('../models/ServiceRequest');
 const path = require('path');
 const fs = require('fs').promises;
 
 const uploadDir = path.join(__dirname, '../uploads/service-requests');
-(async () => {
-  await fs.mkdir(uploadDir, { recursive: true });
-})();
+(async () => { await fs.mkdir(uploadDir, { recursive: true }); })();
 
-// ---------- USER: Create request ----------
+// ---------- CREATE (updated to include new fields) ----------
 exports.createRequest = async (req, res) => {
   try {
-    const { serviceType, title, description } = req.body;
+    const { serviceType, title, description, contactNumber, isUrgent } = req.body;
     if (!serviceType || !title || !description) {
       return res.status(400).json({ success: false, message: 'Service type, title and description are required' });
     }
@@ -20,6 +19,8 @@ exports.createRequest = async (req, res) => {
       serviceType,
       title,
       description,
+      contactNumber: contactNumber || '',
+      isUrgent: isUrgent === 'true' || isUrgent === true,
       createdBy: req.user.id,
     };
 
@@ -41,17 +42,14 @@ exports.createRequest = async (req, res) => {
     const serviceRequest = await ServiceRequest.create(requestData);
     res.status(201).json({ success: true, serviceRequest });
   } catch (error) {
-    // Cleanup files on error
     if (req.files) {
-      for (const file of req.files) {
-        await fs.unlink(file.path).catch(() => {});
-      }
+      for (const file of req.files) await fs.unlink(file.path).catch(() => {});
     }
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// ---------- USER: Get own requests ----------
+// ---------- GET MY REQUESTS (already fine) ----------
 exports.getMyRequests = async (req, res) => {
   try {
     const { page = 1, limit = 10, status } = req.query;
@@ -77,11 +75,11 @@ exports.getMyRequests = async (req, res) => {
   }
 };
 
-// ---------- ADMIN: Get all requests ----------
+// ---------- ADMIN GET ALL (unchanged) ----------
 exports.getAllRequests = async (req, res) => {
   try {
     const { page = 1, limit = 20, status, serviceType, search } = req.query;
-    const filter = {};                              // ✅ fixed (removed ': any')
+    const filter = {};
     if (status) filter.status = status;
     if (serviceType) filter.serviceType = serviceType;
     if (search) {
@@ -111,7 +109,7 @@ exports.getAllRequests = async (req, res) => {
   }
 };
 
-// ---------- Get single request ----------
+// ---------- GET SINGLE ----------
 exports.getRequestById = async (req, res) => {
   try {
     const request = await ServiceRequest.findById(req.params.id)
@@ -119,18 +117,46 @@ exports.getRequestById = async (req, res) => {
       .lean();
     if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
 
-    // Authorization: owner or admin
-    if (req.user.id !== request.user._id.toString() && !req.user.role.includes('ADMIN') && req.user.role !== 'SUPER_ADMIN') {
+    if (req.user.id !== request.user._id.toString() &&
+        !req.user.role.includes('ADMIN') &&
+        req.user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
-
     res.json({ success: true, request });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// ---------- ADMIN: Update request status / notes ----------
+// ---------- USER UPDATE (only own request, limited fields) ----------
+exports.updateMyRequest = async (req, res) => {
+  try {
+    const request = await ServiceRequest.findById(req.params.id);
+    if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
+
+    // Only owner can edit (admin can also but using different endpoint)
+    if (req.user.id !== request.user.toString()) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const { title, description, contactNumber, isUrgent } = req.body;
+    if (title) request.title = title;
+    if (description) request.description = description;
+    if (contactNumber !== undefined) request.contactNumber = contactNumber;
+    if (isUrgent !== undefined) request.isUrgent = isUrgent === 'true' || isUrgent === true;
+
+    // Handle new attachments? (optional) – we can add but keep simple for now
+    // If you want to support replacing attachments, you can add later.
+
+    request.updatedBy = req.user.id;
+    await request.save();
+    res.json({ success: true, request });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ---------- ADMIN UPDATE (status, notes) ----------
 exports.updateRequest = async (req, res) => {
   try {
     const { status, adminNotes } = req.body;
@@ -143,6 +169,34 @@ exports.updateRequest = async (req, res) => {
     await request.save();
 
     res.json({ success: true, request });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// ---------- DELETE (owner or admin) ----------
+exports.deleteRequest = async (req, res) => {
+  try {
+    const request = await ServiceRequest.findById(req.params.id);
+    if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
+
+    // Only the owner or an admin can delete
+    if (req.user.id !== request.user.toString() &&
+        req.user.role !== 'SUPER_ADMIN' &&
+        req.user.role !== 'ADDITIONAL_DIRECTOR') {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    // Delete attachments from disk
+    if (request.attachments && request.attachments.length > 0) {
+      for (const att of request.attachments) {
+        const filePath = path.join(__dirname, '..', att.fileUrl);
+        await fs.unlink(filePath).catch(() => {});
+      }
+    }
+
+    await ServiceRequest.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Request deleted' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
