@@ -38,33 +38,53 @@ exports.trackClick = async (req, res) => {
         const { campaignId, adId } = req.body;
         const actualCampaignId = campaignId || adId;
 
-        const campaign = await AdCampaign.findById(actualCampaignId);
-        if (!campaign) {
-            return res.status(404).json({ success: false, message: 'Campaign not found' });
+        if (!actualCampaignId) {
+            return res.status(400).json({
+                success: false,
+                message: "Campaign id is required",
+            });
         }
 
-        campaign.clicks += 1;
-        campaign.spentBudget += campaign.bidAmount;
-        await campaign.save();
+        const existingCampaign = await AdCampaign.findById(actualCampaignId);
+
+        if (!existingCampaign) {
+            return res.status(404).json({
+                success: false,
+                message: "Campaign not found",
+            });
+        }
+
+        await AdCampaign.findByIdAndUpdate(actualCampaignId, {
+            $inc: {
+                clicks: 1,
+                spentBudget: existingCampaign.bidAmount || 0,
+            },
+        });
 
         await AdEvent.create({
             campaignId: actualCampaignId,
             userId: req.user.id,
-            eventType: 'click',
+            eventType: "click",
             metadata: {
-                userLocation: { state: req.user.state, district: req.user.district },
+                userLocation: {
+                    state: req.user.state,
+                    district: req.user.district,
+                },
                 userRole: req.user.role,
-            }
+            },
         });
 
-        await User.findByIdAndUpdate(req.user.id, {
-            $push: { adsSeen: { campaignId: actualCampaignId, clicked: true, clickedAt: new Date() } }
+        res.json({
+            success: true,
+            message: "Click tracked",
         });
-
-        res.json({ success: true, message: 'Click tracked' });
     } catch (error) {
-        console.error('Track click error:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
+        console.error("Track click error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error",
+            error: error.message,
+        });
     }
 };
 
