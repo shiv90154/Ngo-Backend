@@ -9,9 +9,9 @@ const fs = require('fs').promises;
 const mailer = require('../utils/sendEmail');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
-
+const mongoose = require("mongoose")
 const uploadDir = path.join(__dirname, '../uploads/healthcare');
-fs.mkdir(uploadDir, { recursive: true }).catch(() => {});
+fs.mkdir(uploadDir, { recursive: true }).catch(() => { });
 
 // ─── AVAILABILITY ──────────────────────────────────────────────
 exports.setDoctorAvailability = catchAsync(async (req, res, next) => {
@@ -446,7 +446,7 @@ exports.deleteHealthRecord = catchAsync(async (req, res, next) => {
 
   for (const attachment of record.attachments) {
     const filePath = path.join(__dirname, '..', attachment.fileUrl);
-    await fs.unlink(filePath).catch(() => {});
+    await fs.unlink(filePath).catch(() => { });
   }
 
   await HealthRecord.findByIdAndDelete(req.params.id);
@@ -526,7 +526,7 @@ exports.verifyDoctor = catchAsync(async (req, res, next) => {
   doctor.doctorVerification.verificationDate = new Date();
   await doctor.save();
 
-  try { await mailer.sendDoctorVerificationApproved(doctor.email, doctor.fullName); } catch (e) {}
+  try { await mailer.sendDoctorVerificationApproved(doctor.email, doctor.fullName); } catch (e) { }
 
   res.json({ success: true, message: 'डॉक्टर सत्यापित' });
 });
@@ -540,6 +540,27 @@ exports.rejectDoctor = catchAsync(async (req, res, next) => {
   doctor.doctorVerification.rejectionReason = reason || 'कोई कारण नहीं';
   await doctor.save();
   res.json({ success: true, message: 'डॉक्टर अस्वीकृत' });
+});
+
+exports.getDoctorById = catchAsync(async (req, res, next) => {
+  const doctor = await User.findOne({
+    _id: req.params.id,
+    role: "DOCTOR",
+    isVerified: true,
+    isDeleted: false,
+    "doctorVerification.verificationStatus": "approved",
+  }).select(
+    "fullName email phone profileImage doctorProfile state district city isActive rating"
+  );
+
+  if (!doctor) {
+    throw new AppError("Doctor not found", 404);
+  }
+
+  res.json({
+    success: true,
+    doctor,
+  });
 });
 
 // ─── DASHBOARD & PATIENTS ───────────────────────────────────────
