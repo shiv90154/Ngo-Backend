@@ -1,4 +1,3 @@
-// routes/notification.routes.js
 const express = require('express');
 const router = express.Router();
 const { protect, restrictTo } = require('../middleware');
@@ -10,9 +9,12 @@ router.use(protect);
 // ======================
 // USER NOTIFICATION CRUD
 // ======================
+
+// ⚠️ /read-all को /:id/read से पहले रखें
+router.patch('/read-all', notificationController.markAllAsRead);
+
 router.get('/', notificationController.getMyNotifications);
 router.patch('/:id/read', notificationController.markAsRead);
-router.patch('/read-all', notificationController.markAllAsRead);
 router.delete('/:id', notificationController.deleteNotification);
 
 // ======================
