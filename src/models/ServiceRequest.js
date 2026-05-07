@@ -1,3 +1,4 @@
+// models/ServiceRequest.js
 const mongoose = require('mongoose');
 
 const serviceRequestSchema = new mongoose.Schema(
@@ -9,18 +10,8 @@ const serviceRequestSchema = new mongoose.Schema(
     },
     serviceType: {
       type: String,
-      enum: [
-        'Education',
-        'Healthcare',
-        'Finance',
-        'Agriculture',
-        'IT',
-        'Social',
-        'Media',
-        'Ecommerce',
-        'Other',
-      ],
       required: [true, 'Service type is required'],
+      trim: true,
     },
     title: {
       type: String,
@@ -31,6 +22,15 @@ const serviceRequestSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Description is required'],
       trim: true,
+    },
+    contactNumber: {               // 🆕 Contact number
+      type: String,
+      trim: true,
+      default: '',
+    },
+    isUrgent: {                    // 🆕 Urgent flag
+      type: Boolean,
+      default: false,
     },
     status: {
       type: String,
