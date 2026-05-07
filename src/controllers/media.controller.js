@@ -323,11 +323,38 @@ exports.getFeed = catchAsync(async (req, res, next) => {
   await addLikeStatus(posts, userId);
 
   // Insert ad only on first page after 2nd post
-  if (Number(page) === 1 && posts.length >= 2) {
-    const ad = await getAdForFeed(userId, req.user);
-    if (ad) {
-      const adPost = transformAdToPost(ad);
-      posts.splice(2, 0, adPost);
+  if (posts.length >= 2) {
+    // Number of ads to inject randomly
+    // Example: 0 to 2 ads per page
+    const adsToInsert = Math.floor(Math.random() * 3);
+
+    const usedIndexes = new Set();
+
+    // Always insert one ad after 2nd post on first page (testing only)
+    if (Number(page) === 1) {
+      const firstAd = await getAdForFeed(userId, req.user);
+
+      if (firstAd) {
+        posts.splice(2, 0, transformAdToPost(firstAd));
+        usedIndexes.add(2);
+      }
+    }
+
+    for (let i = 0; i < adsToInsert; i++) {
+      const ad = await getAdForFeed(userId, req.user);
+
+      if (!ad) continue;
+
+      let randomIndex;
+
+      do {
+        randomIndex =
+          Math.floor(Math.random() * (posts.length - 2 + 1)) + 2;
+      } while (usedIndexes.has(randomIndex));
+
+      usedIndexes.add(randomIndex);
+
+      posts.splice(randomIndex, 0, transformAdToPost(ad));
     }
   }
 
