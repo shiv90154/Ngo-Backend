@@ -1,3 +1,4 @@
+// src/routes/auth.routes.js
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
@@ -13,7 +14,7 @@ const {
   resetPasswordValidation,
 } = require('../validators/authValidator');
 
-// Multer setup
+// Multer setup (unchanged)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const tempDir = path.join(__dirname, '../../temp_uploads');
@@ -51,6 +52,7 @@ router.post('/verify-reset-otp', otpValidation, userController.verifyResetOtp);
 router.post('/reset-password', resetPasswordValidation, userController.resetPassword);
 
 // ====================== PROTECTED ROUTES ======================
+// Profile
 router.get('/profile', protect, userController.getProfile);
 router.put(
   '/profile',
@@ -63,19 +65,26 @@ router.put(
   userController.updateProfile
 );
 
-// Subordinates
+// Subordinates – only NGO organizational roles can view subordinates
 router.get('/subordinates', protect, userController.getSubordinates);
-router.get('/subordinates/:id', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.getSubordinates);
+router.get(
+  '/subordinates/:id',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_DEVELOPMENT_COORDINATOR',
+             'DISTRICT_BRANCH_MANAGER', 'DISTRICT_PRESIDENT', 'DISTRICT_FIELD_COORDINATOR',
+             'BLOCK_DEVELOPMENT_COORDINATOR', 'GRAM_DEVELOPMENT_COORDINATOR'),
+  userController.getSubordinates
+);
 
-// Wallet
+// Wallet (any logged-in user)
 router.post('/wallet', protect, userController.updateWallet);
 
-// Health Records
+// Health Records – BAMS_DOCTOR included
 router.post('/health-records', protect, upload.single('file'), userController.addHealthRecord);
 router.post(
   '/health-records/user/:userId',
   protect,
-  restrictTo('DOCTOR', 'SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  restrictTo('BAMS_DOCTOR', 'SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
   upload.single('file'),
   userController.addHealthRecord
 );
@@ -88,7 +97,12 @@ router.post('/contract-farming', protect, userController.addContractFarming);
 
 // Loans
 router.post('/loans', protect, userController.addLoan);
-router.post('/loans/user/:userId', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.addLoan);
+router.post(
+  '/loans/user/:userId',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'FINANCE_SERVICE_CONSULTANCY'),
+  userController.addLoan
+);
 
 // CRM Clients
 router.post('/clients', protect, userController.addClient);
@@ -99,19 +113,55 @@ router.post('/projects', protect, userController.addProject);
 // E-commerce Store Products
 router.post('/store-products', protect, upload.single('image'), userController.addStoreProduct);
 
-// AI, MLM, Subscription
+// AI, MLM, Subscription – only SUPER_ADMIN
 router.put('/ai/tokens', protect, restrictTo('SUPER_ADMIN'), userController.updateAITokens);
 router.post('/ai/usage', protect, userController.incrementAIUsage);
-router.post('/subscription/history', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.addSubscriptionHistory);
-router.put('/mlm/payout', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.updateMLMPayout);
+router.post(
+  '/subscription/history',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  userController.addSubscriptionHistory
+);
+router.put(
+  '/mlm/payout',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  userController.updateMLMPayout
+);
 
 // Restore user
-router.patch('/:id/restore', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.restoreUser);
+router.patch(
+  '/:id/restore',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  userController.restoreUser
+);
 
 // Admin user management
-router.get('/', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.getAllUsers);
-router.get('/:id', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_OFFICER'), userController.getUserById);
-router.delete('/:id', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), userController.deleteUser);
-router.post('/assign-hierarchy', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_OFFICER'), userController.assignReporting);
+router.get(
+  '/',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_DEVELOPMENT_COORDINATOR'),
+  userController.getAllUsers
+);
+router.get(
+  '/:id',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_DEVELOPMENT_COORDINATOR'),
+  userController.getUserById
+);
+router.delete(
+  '/:id',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  userController.deleteUser
+);
+router.post(
+  '/assign-hierarchy',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_DEVELOPMENT_COORDINATOR',
+             'DISTRICT_BRANCH_MANAGER', 'DISTRICT_PRESIDENT'),
+  userController.assignReporting
+);
 
 module.exports = router;

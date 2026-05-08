@@ -1,23 +1,25 @@
 const mongoose = require('mongoose');
 
-const campaignSchema = new mongoose.Schema({
-  title: { type: String, required: true, trim: true },
-  description: { type: String, trim: true },
-  goalAmount: { type: Number, required: true, min: 1 },
-  raisedAmount: { type: Number, default: 0 },
-  startDate: { type: Date, required: true },
-  endDate: { type: Date, required: true },
-  status: { type: String, enum: ['active', 'completed', 'cancelled'], default: 'active' },
-  image: String,
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-}, { timestamps: true });
+const campaignSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    description: String,
+    goalAmount: { type: Number, required: true, min: 0 },
+    collectedAmount: { type: Number, default: 0, min: 0 },
+    startDate: Date,
+    endDate: { type: Date, required: true },
+    status: { type: String, enum: ['active', 'completed', 'cancelled'], default: 'active' },
+    // Scope fields
+    state: { type: String, trim: true },
+    district: { type: String, trim: true },
+    block: { type: String, trim: true },
+    village: { type: String, trim: true },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  },
+  { timestamps: true }
+);
 
-campaignSchema.virtual('progress').get(function () {
-  if (this.goalAmount === 0) return 0;
-  return Math.min(100, Math.round((this.raisedAmount / this.goalAmount) * 100));
-});
-
-campaignSchema.set('toJSON', { virtuals: true });
-campaignSchema.set('toObject', { virtuals: true });
+campaignSchema.index({ status: 1, endDate: 1 });
+campaignSchema.index({ state: 1 });
 
 module.exports = mongoose.model('Campaign', campaignSchema);

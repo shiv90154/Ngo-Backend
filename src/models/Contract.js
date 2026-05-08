@@ -2,100 +2,34 @@ const mongoose = require('mongoose');
 
 const contractSchema = new mongoose.Schema(
   {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-      unique: true,          // one active contract per user
-    },
     role: {
       type: String,
       required: true,
+      unique: true, // एक रोल के लिए केवल एक एक्टिव कॉन्ट्रैक्ट
+      enum: [
+        // सभी मौजूदा रोल्स
+        'SUPER_ADMIN', 'ADDITIONAL_DIRECTOR',
+        'STATE_DEVELOPMENT_COORDINATOR', 'DISTRICT_BRANCH_MANAGER',
+        'DISTRICT_PRESIDENT', 'DISTRICT_FIELD_COORDINATOR',
+        'BAMS_DOCTOR', 'BLOCK_DEVELOPMENT_COORDINATOR',
+        'GRAM_DEVELOPMENT_COORDINATOR',
+        'IT_DEVELOPER', 'TEACHER', 'NEWS_EDITOR',
+        'AGRICULTURE_CONSULTANCY', 'FINANCE_SERVICE_CONSULTANCY',
+        'NGO_CONSULTANCY', 'PROJECT_BASED_INTEGRATED_ROLE',
+        'VENDOR', 'AGENT', 'USER',
+      ],
     },
-    // Personal info (duplicated for the contract)
-    fullName: String,
-    fatherName: String,
-    dob: Date,
-    address: String,
-    phone: String,
-    email: String,
-    aadhaarNumber: String,
-    panNumber: String,
-    qualification: String,
-    currentWork: String,
-    state: String,
-    district: String,
-    block: String,
-    gramPanchayat: String,
-    photoAttached: Boolean,
-
-    // Processing Fee
-    processingFee: {
-      amount: { type: Number, required: true },
-      paid: { type: Boolean, default: false },
-      mode: String,  // Cash, UPI, Bank Transfer, Online
-      transactionId: String,
-      paymentDate: Date,
-      receiptUrl: String,   // uploaded receipt image
-    },
-
-    // Voluntary Donation
-    donation: {
-      amount: Number,
-      paid: { type: Boolean, default: false },
-      mode: String,
-      transactionId: String,
-      paymentDate: Date,
-      chequeNumber: String,
-      bankName: String,
-      receiptUrl: String,
-    },
-
-    // Security Deposit
-    securityDeposit: {
-      amount: { type: Number, required: true },
-      paid: { type: Boolean, default: false },
-      mode: String,
-      transactionId: String,
-      paymentDate: Date,
-      receiptUrl: String,
-    },
-
-    // Terms Acceptance
-    termsAccepted: {
-      type: Boolean,
-      default: false,
-    },
-    termsAcceptedAt: Date,
-
-    // Digital Signature (base64 image or simple timestamp)
-    signature: String,       // base64 data URL or file path
-    signedAt: Date,
-
-    // Admin Review
-    adminStatus: {
-      type: String,
-      enum: ['pending', 'approved', 'rejected'],
-      default: 'pending',
-    },
-    adminNotes: String,
-    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    reviewedAt: Date,
-
-    // Status for user's own tracking
-    status: {
-      type: String,
-      enum: ['draft', 'completed', 'rejected'],
-      default: 'draft',
-    },
+    title: { type: String, required: true },
+    content: { type: String, required: true },           // HTML content of the agreement
+    terms: [String],                                     // array of terms & conditions
+    requiredFields: [String],                            // user must fill these fields (e.g., "processingFee", "securityDeposit")
+    isActive: { type: Boolean, default: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
 );
 
-contractSchema.index({ user: 1 });
 contractSchema.index({ role: 1 });
-contractSchema.index({ adminStatus: 1 });
 
 module.exports = mongoose.model('Contract', contractSchema);
