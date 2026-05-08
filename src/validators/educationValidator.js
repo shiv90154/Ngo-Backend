@@ -96,3 +96,123 @@ exports.markLessonComplete = [
     .isMongoId()
     .withMessage('अमान्य पाठ ID'),
 ];
+// validators/educationValidator.js
+
+// Add these validation schemas to your existing validators file
+exports.createBatch = [
+  body("title")
+    .notEmpty()
+    .withMessage("Batch title is required")
+    .isLength({ min: 3, max: 200 })
+    .withMessage("Title must be between 3 and 200 characters"),
+
+  body("description")
+    .optional()
+    .isLength({ max: 2000 })
+    .withMessage("Description cannot exceed 2000 characters"),
+
+  body("course")
+    .optional()
+    .isMongoId()
+    .withMessage("Invalid course ID"),
+
+  body("category")
+    .optional()
+    .isIn(["academic", "competitive", "skill", "other"])
+    .withMessage("Invalid category"),
+
+  body("targetClasses")
+    .optional()
+    .isArray()
+    .withMessage("Target classes must be an array"),
+
+  body("targetInterests")
+    .optional()
+    .isArray()
+    .withMessage("Target interests must be an array"),
+
+  body("maxStudents")
+    .optional()
+    .isInt({ min: 1, max: 1000 })
+    .withMessage("Max students must be between 1 and 1000"),
+
+  body("startDate")
+    .notEmpty()
+    .withMessage("Start date is required")
+    .isISO8601()
+    .withMessage("Invalid start date format"),
+
+  body("endDate")
+    .notEmpty()
+    .withMessage("End date is required")
+    .isISO8601()
+    .withMessage("Invalid end date format")
+    .custom((value, { req }) => {
+      if (new Date(value) <= new Date(req.body.startDate)) {
+        throw new Error("End date must be after start date");
+      }
+      return true;
+    }),
+
+  body("schedule")
+    .optional()
+    .isObject()
+    .withMessage("Schedule must be an object"),
+
+  body("meetingLink")
+    .optional({ checkFalsy: true })
+    .isURL()
+    .withMessage("Invalid meeting link"),
+
+  body("mode")
+    .optional()
+    .isIn(["online", "offline", "hybrid"])
+    .withMessage("Invalid mode"),
+
+  body("fee")
+    .optional()
+    .isFloat({ min: 0 })
+    .withMessage("Fee must be zero or more"),
+
+  body("isPublished")
+    .optional()
+    .isBoolean()
+    .withMessage("isPublished must be boolean"),
+];
+
+exports.updateBatch = [
+  body("title")
+    .optional()
+    .isLength({ min: 3, max: 200 })
+    .withMessage("Title must be between 3 and 200 characters"),
+
+  body("description")
+    .optional()
+    .isLength({ max: 2000 })
+    .withMessage("Description cannot exceed 2000 characters"),
+
+  body("maxStudents")
+    .optional()
+    .isInt({ min: 1, max: 1000 })
+    .withMessage("Max students must be between 1 and 1000"),
+
+  body("startDate")
+    .optional()
+    .isISO8601()
+    .withMessage("Invalid start date format"),
+
+  body("endDate")
+    .optional()
+    .isISO8601()
+    .withMessage("Invalid end date format"),
+
+  body("isActive")
+    .optional()
+    .isBoolean()
+    .withMessage("isActive must be boolean"),
+
+  body("isPublished")
+    .optional()
+    .isBoolean()
+    .withMessage("isPublished must be boolean"),
+];
