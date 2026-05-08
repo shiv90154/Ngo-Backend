@@ -1,19 +1,22 @@
 const mongoose = require('mongoose');
 
-const expenseSchema = new mongoose.Schema({
-  title: { type: String, required: true, trim: true },
-  amount: { type: Number, required: true, min: 0 },
-  category: {
-    type: String,
-    enum: ['travel', 'events', 'utilities', 'staff', 'office', 'marketing', 'other'],
-    default: 'other',
+const expenseSchema = new mongoose.Schema(
+  {
+    category: { type: String, required: true, trim: true }, // e.g., "Travel", "Events", "Utilities"
+    amount: { type: Number, required: true, min: 0 },
+    description: String,
+    date: { type: Date, required: true },
+    // Scope fields
+    state: { type: String, trim: true },
+    district: { type: String, trim: true },
+    block: { type: String, trim: true },
+    village: { type: String, trim: true },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
-  date: { type: Date, default: Date.now },
-  description: String,
-  receiptUrl: String,                // optional uploaded receipt
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-}, { timestamps: true });
+  { timestamps: true }
+);
 
-expenseSchema.index({ category: 1, date: -1 });
+expenseSchema.index({ date: -1 });
+expenseSchema.index({ state: 1, district: 1 });
 
 module.exports = mongoose.model('Expense', expenseSchema);

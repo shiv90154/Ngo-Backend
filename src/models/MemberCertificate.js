@@ -1,22 +1,19 @@
 const mongoose = require('mongoose');
 
-const memberCertificateSchema = new mongoose.Schema({
-  member: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  type: {
-    type: String,
-    enum: ['membership_certificate', 'id_card', 'appointment_letter', 'achievement', 'visitor'],
-    required: true,
+const memberCertificateSchema = new mongoose.Schema(
+  {
+    memberName: { type: String, required: true, trim: true },
+    certificateType: { type: String, required: true }, // "membership_certificate", "achievement", "visitor", etc.
+    customMessage: String,
+    template: { type: Number, default: 1 },
+    issuedDate: { type: Date, default: Date.now },
+    verificationCode: { type: String, unique: true, required: true },
+    certificateUrl: String,                    // PDF file path
+    issuedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
-  template: { type: Number, default: 1, min: 1, max: 6 },
-  issuedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  certificateUrl: String,
-  qrCodeUrl: String,
-  verificationCode: { type: String, unique: true },
-  issuedAt: { type: Date, default: Date.now },
-  notes: String,
-}, { timestamps: true });
+  { timestamps: true }
+);
 
-memberCertificateSchema.index({ member: 1 });
 memberCertificateSchema.index({ verificationCode: 1 });
 
 module.exports = mongoose.model('MemberCertificate', memberCertificateSchema);

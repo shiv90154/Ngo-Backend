@@ -1,21 +1,28 @@
 const mongoose = require('mongoose');
 
-const donationSchema = new mongoose.Schema({
-  donor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  amount: { type: Number, required: true },
-  paymentMethod: {
-    type: String,
-    enum: ['online', 'cash', 'bank_transfer', 'cheque'],
-    required: true,
+const donationSchema = new mongoose.Schema(
+  {
+    donorName: { type: String, trim: true },               // optional, अनाम हो सकता है
+    email: { type: String, trim: true, lowercase: true },
+    amount: { type: Number, required: true, min: 0 },
+    purpose: { type: String, trim: true },                 // e.g., "शिक्षा", "स्वास्थ्य"
+    date: { type: Date, default: Date.now },
+    type: { type: String, enum: ['online', 'cash'], default: 'online' },
+    receiptUrl: String,                                    // generated PDF/UUID
+    // Scope fields (filled automatically via scopeFilter middleware)
+    state: { type: String, trim: true },
+    district: { type: String, trim: true },
+    block: { type: String, trim: true },
+    village: { type: String, trim: true },
+    // Metadata
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // donor (if registered)
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },           // NGO officer who created entry
   },
-  transactionId: String,
-  receiptUrl: String,        // PDF receipt URL
-  qrCodeUrl: String,          // QR code image URL
-  purpose: String,
-  status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'completed' },
-  donationDate: { type: Date, default: Date.now },
-  receiptEmailed: { type: Boolean, default: false },
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-}, { timestamps: true });
+  { timestamps: true }
+);
+
+donationSchema.index({ state: 1, district: 1 });
+donationSchema.index({ createdAt: -1 });
+donationSchema.index({ donorName: 'text', email: 'text' });
 
 module.exports = mongoose.model('Donation', donationSchema);

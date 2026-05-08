@@ -1,17 +1,18 @@
 const express = require('express');
 const router = express.Router();
-const campaignController = require('../controllers/campaign.controller');
 const { protect, restrictTo } = require('../middleware');
+const campaignController = require('../controllers/campaign.controller');
+const { NGO_ORGANIZATIONAL_ROLES } = require('../config/roles');
 
-// Public
-router.get('/active', campaignController.getActiveCampaigns);
+const ALLOWED = ['SUPER_ADMIN', ...NGO_ORGANIZATIONAL_ROLES];
 
-// User
-router.post('/donate', campaignController.donateToCampaign);
+// Public – only protect
+router.get('/active', protect, campaignController.getActiveCampaigns);
+router.get('/all', protect, campaignController.getAllCampaigns);   // all can see, but admin can manage
+router.post('/donate', protect, campaignController.donateToCampaign);
 
-// Admin
-router.post('/', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), campaignController.createCampaign);
-router.put('/:id', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), campaignController.updateCampaign);
-router.get('/all', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), campaignController.getAllCampaigns);
+// Admin / NGO Management
+router.post('/', protect, restrictTo(...ALLOWED), campaignController.createCampaign);
+router.put('/:id', protect, restrictTo(...ALLOWED), campaignController.updateCampaign);
 
 module.exports = router;

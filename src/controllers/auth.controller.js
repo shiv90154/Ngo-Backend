@@ -6,25 +6,34 @@ const path = require('path');
 const fs = require('fs').promises;
 const { validationResult } = require('express-validator');
 
-// Complete roles list (matching the updated User model)
+// ✅ Final Role List (Client Approved)
 const VALID_ROLES = [
   'SUPER_ADMIN',
+
+  // ── NGO Organizational Roles ──
   'ADDITIONAL_DIRECTOR',
-  'STATE_OFFICER',
-  'DISTRICT_MANAGER',
+  'STATE_DEVELOPMENT_COORDINATOR',
+  'DISTRICT_BRANCH_MANAGER',
   'DISTRICT_PRESIDENT',
-  'FIELD_OFFICER',
-  'JILLA_BRANCH_MANAGER',
-  'JILLA_ADYAKSH',
-  'JILLA_FIELD_OFFICER',
-  'BLOCK_OFFICER',
-  'VILLAGE_OFFICER',
-  'GRAM_BIKAS_ADHIKARI',
-  'DOCTOR',
+  'DISTRICT_FIELD_COORDINATOR',
+  'BAMS_DOCTOR',
+  'BLOCK_DEVELOPMENT_COORDINATOR',
+  'GRAM_DEVELOPMENT_COORDINATOR',
+
+  // ── Sanstha Project Roles ──
+  'IT_DEVELOPER',
   'TEACHER',
+  'NEWS_EDITOR',
+  'AGRICULTURE_CONSULTANCY',
+  'FINANCE_SERVICE_CONSULTANCY',
+  'NGO_CONSULTANCY',
+  'PROJECT_BASED_INTEGRATED_ROLE',
+
+  // ── Vendor / Marketplace ──
+  'VENDOR',
   'AGENT',
-  'NGO',
-  'CLUB',
+
+  // ── User ──
   'USER',
 ];
 
@@ -67,7 +76,7 @@ exports.register = async (req, res) => {
       reportsTo, sponsorId,
       // TEACHER
       specialization, qualifications, experienceYears,
-      // DOCTOR
+      // DOCTOR / BAMS
       doctorSpecialization, doctorExperience, consultationFee, registrationNumber,
       // DOCTOR VERIFICATION
       qualification, college, yearOfPassing, medicalCouncilRegNumber,
@@ -146,26 +155,15 @@ exports.register = async (req, res) => {
       sponsorId: sponsorId || null,
       createdBy: req.user ? req.user.id : null,
       updatedBy: req.user ? req.user.id : null,
-      aiUsage: {
-        diseaseDetectionCount: 0,
-        aiTokensRemaining: 10,
-      },
-      mlmPayoutInfo: {
-        pendingCommission: 0,
-        totalWithdrawn: 0,
-      },
+      aiUsage: { diseaseDetectionCount: 0, aiTokensRemaining: 10 },
+      mlmPayoutInfo: { pendingCommission: 0, totalWithdrawn: 0 },
       twoFactorEnabled: false,
       isDeleted: false,
       developedBy: developedBy || null,
       testedBy: testedBy || null,
       qaStatus: qaStatus || 'pending',
-      licenseStats: {
-        totalLicensesSold: 0,
-        monthlyLicensesSold: 0,
-        lastMonthReset: new Date(),
-        salaryEligible: false,
-      },
-      contractStatus: 'draft',                     // 🆕 new field
+      licenseStats: { totalLicensesSold: 0, monthlyLicensesSold: 0, lastMonthReset: new Date(), salaryEligible: false },
+      contractStatus: 'draft',
     };
 
     // Teacher profile
@@ -178,8 +176,8 @@ exports.register = async (req, res) => {
       };
     }
 
-    // Doctor profile
-    if (mappedRole === 'DOCTOR' || userModules.includes('HEALTHCARE')) {
+    // Doctor profile (BAMS_DOCTOR भी डॉक्टर है)
+    if (mappedRole === 'BAMS_DOCTOR' || userModules.includes('HEALTHCARE')) {
       userData.doctorProfile = {
         specialization: doctorSpecialization || '',
         experienceYears: doctorExperience ? parseInt(doctorExperience) : 0,
@@ -206,54 +204,27 @@ exports.register = async (req, res) => {
 
     // Education profile (for students)
     if (userModules.includes('EDUCATION')) {
-      userData.educationProfile = {
-        className: className || '',
-        schoolName: schoolName || '',
-        board: board || '',
-        percentage: percentage || '',
-      };
+      userData.educationProfile = { className: className || '', schoolName: schoolName || '', board: board || '', percentage: percentage || '' };
     }
 
     // IT profile
     if (userModules.includes('IT')) {
-      userData.itProfile = {
-        projectType: projectType || '',
-        techStack: techStack || '',
-        experience: experience || '',
-      };
+      userData.itProfile = { projectType: projectType || '', techStack: techStack || '', experience: experience || '' };
     }
 
     // Social profile
     if (userModules.includes('SOCIAL')) {
-      userData.socialProfile = {
-        username: username || '',
-        bio: bio || '',
-        interests: interests || '',
-        followersCount: 0,
-        followingCount: 0,
-      };
+      userData.socialProfile = { username: username || '', bio: bio || '', interests: interests || '', followersCount: 0, followingCount: 0 };
     }
 
     // Media creator profile
     if (userModules.includes('MEDIA') || isMediaCreator === 'true' || isMediaCreator === true) {
-      userData.mediaCreatorProfile = {
-        isCreator: true,
-        creatorStatus: 'pending',
-        totalPosts: 0,
-        totalFollowers: 0,
-        monetizationEarnings: 0,
-        liveStreamingKey: Math.random().toString(36).substring(2, 15),
-      };
+      userData.mediaCreatorProfile = { isCreator: true, creatorStatus: 'pending', totalPosts: 0, totalFollowers: 0, monetizationEarnings: 0, liveStreamingKey: Math.random().toString(36).substring(2, 15) };
     }
 
     // Seller profile
     if (userModules.includes('ECOMMERCE') || isSeller === 'true' || isSeller === true) {
-      userData.sellerProfile = {
-        isSeller: true,
-        storeName: storeName || `${finalName}'s Store`,
-        gstNumber: gstNumber || '',
-        rating: 0,
-      };
+      userData.sellerProfile = { isSeller: true, storeName: storeName || `${finalName}'s Store`, gstNumber: gstNumber || '', rating: 0 };
     }
 
     // Bank account
@@ -281,7 +252,6 @@ exports.register = async (req, res) => {
         return null;
       };
 
-      // Common uploads
       const profileImage = await moveFile('profileImage', 'profile') || await moveFile('profilePicture', 'profile');
       if (profileImage) user.profileImage = profileImage;
 
@@ -294,7 +264,6 @@ exports.register = async (req, res) => {
       const storeLogo = await moveFile('storeLogo', 'store_logo');
       if (storeLogo && user.sellerProfile) user.sellerProfile.storeLogo = storeLogo;
 
-      // Doctor verification files
       const degreeCert = await moveFile('degreeCertificate', 'degree');
       const regCert = await moveFile('registrationCertificate', 'regcert');
       if (degreeCert || regCert) {
@@ -307,11 +276,7 @@ exports.register = async (req, res) => {
     await user.save();
     sendEmail(finalEmail, otp).catch(err => console.error('Email error:', err));
 
-    res.status(201).json({
-      success: true,
-      message: 'OTP sent to email. Please verify.',
-      email: user.email,
-    });
+    res.status(201).json({ success: true, message: 'OTP sent to email. Please verify.', email: user.email });
   } catch (error) {
     if (req.files) {
       for (const field in req.files) {
@@ -334,33 +299,24 @@ exports.register = async (req, res) => {
 exports.verifyOTP = async (req, res) => {
   try {
     const { email, otp } = req.body;
-    if (!email || !otp) {
-      return res.status(400).json({ success: false, message: 'Email and OTP required' });
-    }
+    if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
     const user = await User.findOne({ email });
     if (!user || !user.otp || !(await verifyOTP(otp, user.otp))) {
       return res.status(400).json({ success: false, message: 'Invalid OTP' });
     }
-    if (user.otpExpire < Date.now()) {
-      return res.status(400).json({ success: false, message: 'OTP expired' });
-    }
+    if (user.otpExpire < Date.now()) return res.status(400).json({ success: false, message: 'OTP expired' });
     user.isVerified = true;
     user.otp = null;
     user.otpExpire = null;
     await user.save();
 
-    try {
-      await sendEmail.sendWelcome(user.email, user.fullName);
-    } catch (emailErr) {
-      console.error('Welcome email failed:', emailErr.message);
-    }
+    try { await sendEmail.sendWelcome(user.email, user.fullName); } catch (e) {}
 
     const token = jwt.sign(
       { id: user._id, role: user.role, modules: user.modules },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRE || '7d' }
     );
-
     const userData = user.toObject();
     delete userData.password;
     delete userData.otp;
@@ -383,8 +339,7 @@ exports.resendOTP = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     if (user.isVerified) return res.status(400).json({ success: false, message: 'Already verified' });
     const otp = generateOTP();
-    const hashedOtp = await hashOTP(otp);
-    user.otp = hashedOtp;
+    user.otp = await hashOTP(otp);
     user.otpExpire = Date.now() + 5 * 60 * 1000;
     await user.save();
     await sendEmail(email, otp);
@@ -400,9 +355,7 @@ exports.resendOTP = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ success: false, message: 'Email and password required' });
-    }
+    if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password required' });
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     if (user.isDeleted) return res.status(403).json({ success: false, message: 'Account is deactivated' });
@@ -418,7 +371,6 @@ exports.login = async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRE || '7d' }
     );
-
     const userData = user.toObject();
     delete userData.password;
     delete userData.otp;
@@ -442,11 +394,9 @@ exports.forgotPassword = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     const otp = generateOTP();
-    const hashedOtp = await hashOTP(otp);
-    user.otp = hashedOtp;
+    user.otp = await hashOTP(otp);
     user.otpExpire = Date.now() + 10 * 60 * 1000;
     await user.save();
-
     await sendEmail(email, otp).catch(err => console.error('Email error:', err));
 
     res.json({ success: true, message: 'OTP sent to your email' });
@@ -461,9 +411,7 @@ exports.forgotPassword = async (req, res) => {
 exports.verifyResetOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
-    if (!email || !otp) {
-      return res.status(400).json({ success: false, message: 'Email and OTP are required' });
-    }
+    if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP are required' });
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     if (!user.otp || !(await verifyOTP(otp, user.otp)) || user.otpExpire < Date.now()) {
@@ -481,25 +429,18 @@ exports.verifyResetOtp = async (req, res) => {
 exports.resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
-    if (!email || !otp || !newPassword) {
-      return res.status(400).json({ success: false, message: 'All fields are required' });
-    }
+    if (!email || !otp || !newPassword) return res.status(400).json({ success: false, message: 'All fields are required' });
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     if (!user.otp || !(await verifyOTP(otp, user.otp)) || user.otpExpire < Date.now()) {
       return res.status(400).json({ success: false, message: 'Invalid or expired OTP' });
     }
-
     user.password = newPassword;
     user.otp = undefined;
     user.otpExpire = undefined;
     await user.save();
 
-    try {
-      await sendEmail.sendPasswordReset(user.email, user.fullName);
-    } catch (emailErr) {
-      console.error('Password reset email failed:', emailErr.message);
-    }
+    try { await sendEmail.sendPasswordReset(user.email, user.fullName); } catch (e) {}
 
     res.json({ success: true, message: 'Password reset successfully' });
   } catch (error) {
@@ -533,7 +474,6 @@ exports.updateProfile = async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
-    // File helper
     const moveFile = async (fieldName, prefix) => {
       const file = req.files?.[fieldName]?.[0];
       if (!file) return null;
@@ -550,12 +490,10 @@ exports.updateProfile = async (req, res) => {
       return url;
     };
 
-    // Common files
     await moveFile('profileImage', 'profile');
     await moveFile('profilePicture', 'profile');
     await moveFile('storeLogo', 'store_logo');
 
-    // Basic fields
     const simpleFields = [
       'fullName', 'phone', 'fatherName', 'motherName', 'dob', 'gender',
       'state', 'district', 'block', 'village', 'pincode', 'fullAddress',
@@ -639,12 +577,8 @@ exports.updateProfile = async (req, res) => {
       const isCreator = req.body.isMediaCreator === 'true' || req.body.isMediaCreator === true;
       if (isCreator && !user.mediaCreatorProfile) {
         user.mediaCreatorProfile = {
-          isCreator: true,
-          creatorStatus: 'pending',
-          totalPosts: 0,
-          totalFollowers: 0,
-          monetizationEarnings: 0,
-          liveStreamingKey: Math.random().toString(36).substring(2, 15),
+          isCreator: true, creatorStatus: 'pending', totalPosts: 0, totalFollowers: 0,
+          monetizationEarnings: 0, liveStreamingKey: Math.random().toString(36).substring(2, 15),
         };
       } else if (!isCreator && user.mediaCreatorProfile) {
         user.mediaCreatorProfile = null;
@@ -656,10 +590,8 @@ exports.updateProfile = async (req, res) => {
       const isSeller = req.body.isSeller === 'true' || req.body.isSeller === true;
       if (isSeller && !user.sellerProfile) {
         user.sellerProfile = {
-          isSeller: true,
-          storeName: req.body.storeName || `${user.fullName}'s Store`,
-          gstNumber: req.body.gstNumber || '',
-          rating: 0,
+          isSeller: true, storeName: req.body.storeName || `${user.fullName}'s Store`,
+          gstNumber: req.body.gstNumber || '', rating: 0,
         };
       } else if (!isSeller && user.sellerProfile) {
         user.sellerProfile = null;
@@ -978,10 +910,7 @@ exports.addHealthRecord = async (req, res) => {
     }
 
     user.healthRecords.push({
-      recordType,
-      title,
-      description,
-      fileUrl,
+      recordType, title, description, fileUrl,
       date: date ? new Date(date) : new Date(),
       doctorId: req.user.id,
     });
@@ -1013,15 +942,8 @@ exports.addProductListing = async (req, res) => {
     }
 
     const newProduct = {
-      name,
-      price: parseFloat(price),
-      quantity: parseFloat(quantity),
-      unit,
-      category,
-      description,
-      imageUrl,
-      sellerId: userId,
-      createdAt: new Date(),
+      name, price: parseFloat(price), quantity: parseFloat(quantity), unit, category, description,
+      imageUrl, sellerId: userId, createdAt: new Date(),
     };
     user.productListings.push(newProduct);
     await user.save();
@@ -1100,14 +1022,8 @@ exports.addClient = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     const client = {
-      name,
-      email,
-      phone,
-      company,
-      gstNumber,
-      address,
-      createdBy: userId,
-      createdAt: new Date(),
+      name, email, phone, company, gstNumber, address,
+      createdBy: userId, createdAt: new Date(),
     };
     user.clients.push(client);
     await user.save();
@@ -1128,9 +1044,7 @@ exports.addProject = async (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
     const project = {
-      name,
-      description,
-      clientId,
+      name, description, clientId,
       startDate: new Date(startDate),
       endDate: new Date(endDate),
       budget: parseFloat(budget),
@@ -1168,14 +1082,8 @@ exports.addStoreProduct = async (req, res) => {
     }
 
     const product = {
-      name,
-      price: parseFloat(price),
-      category,
-      stock: parseInt(stock),
-      description,
-      imageUrl,
-      sellerId: userId,
-      createdAt: new Date(),
+      name, price: parseFloat(price), category, stock: parseInt(stock), description,
+      imageUrl, sellerId: userId, createdAt: new Date(),
     };
     user.storeProducts.push(product);
     await user.save();

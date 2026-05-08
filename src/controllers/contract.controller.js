@@ -1,195 +1,112 @@
 const Contract = require('../models/Contract');
 const User = require('../models/user.model');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/AppError');
 
-// Multer setup for receipt uploads
-const uploadDir = path.join(__dirname, '../uploads/contract-receipts');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+// ADMIN: Create or Update contract for a role
+exports.createOrUpdateContract = catchAsync(async (req, res, next) => {
+  const { role, title, content, terms, requiredFields } = req.body;
+  if (!role || !title || !content) throw new AppError('भूमिका, शीर्षक और सामग्री आवश्यक हैं', 400);
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => {
-    const unique = `${Date.now()}_${Math.random().toString(36).substring(2)}${path.extname(file.originalname)}`;
-    cb(null, unique);
-  },
+  // Upsert – अगर पहले से है तो अपडेट करो, नहीं तो बनाओ
+  const contract = await Contract.findOneAndUpdate(
+    { role },
+    { title, content, terms, requiredFields, updatedBy: req.user.id },
+    { new: true, upsert: true, runValidators: true }
+  );
+  res.status(200).json({ success: true, contract });
 });
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
-// ---------- USER: Get own contract ----------
-exports.getMyContract = async (req, res) => {
-  try {
-    let contract = await Contract.findOne({ user: req.user.id }).populate('user', 'fullName role');
-    if (!contract) {
-      const user = await User.findById(req.user.id);
-      if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+// ADMIN: Get all contracts
+exports.getAllContracts = catchAsync(async (req, res, next) => {
+  const contracts = await Contract.find().sort({ role: 1 });
+  res.json({ success: true, contracts });
+});
 
-      const feeMap = {
-        STATE_OFFICER: 10000,
-        DISTRICT_MANAGER: 5000,
-        DEFAULT: 0,
-      };
-      const depositMap = {
-        STATE_OFFICER: 50000,
-        DISTRICT_MANAGER: 20000,
-        DEFAULT: 0,
-      };
+// USER: Get own contract (based on role)
+exports.getMyContract = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user.id);
+  if (!user) throw new AppError('यूज़र नहीं मिला', 404);
 
-      contract = await Contract.create({
-        user: req.user.id,
-        role: user.role,
-        fullName: user.fullName,
-        fatherName: user.fatherName || '',
-        dob: user.dob,
-        address: user.fullAddress || '',
-        phone: user.phone,
-        email: user.email,
-        aadhaarNumber: user.aadhaarNumber || '',
-        panNumber: user.panNumber || '',
-        qualification: user.teacherProfile?.qualifications?.join(', ') || '',
-        state: user.state || '',
-        district: user.district || '',
-        block: user.block || '',
-        gramPanchayat: user.village || '',
-        processingFee: { amount: feeMap[user.role] || feeMap.DEFAULT },
-        securityDeposit: { amount: depositMap[user.role] || depositMap.DEFAULT },
-        createdBy: req.user.id,
-      });
-    }
-    res.json({ success: true, contract });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  const contract = await Contract.findOne({ role: user.role, isActive: true });
+  if (!contract) {
+    // अगर कोई कॉन्ट्रैक्ट नहीं है तो खाली भेजो
+    return res.json({ success: true, contract: null, message: 'इस भूमिका के लिए कोई अनुबंध नहीं है' });
   }
-};
 
-// ---------- USER: Update contract (step‑by‑step) ----------
-exports.updateMyContract = async (req, res) => {
-  try {
-    let contract = await Contract.findOne({ user: req.user.id });
-    if (!contract) return res.status(404).json({ success: false, message: 'Contract not found' });
+  // Check user's current contract status
+  const userContractData = {
+    contract,
+    userStatus: {
+      contractStatus: user.contractStatus,
+      contractCompletedAt: user.contractCompletedAt,
+      processingFee: user.processingFee,
+      securityDeposit: user.securityDeposit,
+    },
+  };
 
-    const simpleFields = [
-      'fullName','fatherName','dob','address','phone','email',
-      'aadhaarNumber','panNumber','qualification','currentWork',
-      'state','district','block','gramPanchayat'
-    ];
-    simpleFields.forEach(f => {
-      if (req.body[f] !== undefined) contract[f] = req.body[f];
-    });
+  res.json({ success: true, data: userContractData });
+});
 
-    if (req.files) {
-      const moveFile = (fieldName, targetField) => {
-        if (req.files[fieldName]) {
-          const file = req.files[fieldName][0];
-          contract[targetField] = `/uploads/contract-receipts/${file.filename}`;
-        }
-      };
-      moveFile('processingFeeReceipt', 'processingFee.receiptUrl');
-      moveFile('donationReceipt', 'donation.receiptUrl');
-      moveFile('securityDepositReceipt', 'securityDeposit.receiptUrl');
-      if (req.files.signature) {
-        const sigFile = req.files.signature[0];
-        contract.signature = `/uploads/contract-receipts/${sigFile.filename}`;
-        contract.signedAt = new Date();
-      }
-    }
+// USER: Sign / Complete contract
+exports.updateMyContract = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.user.id);
+  if (!user) throw new AppError('यूज़र नहीं मिला', 404);
 
-    if (req.body.processingFee) {
-      const pf = JSON.parse(req.body.processingFee);
-      contract.processingFee = { ...contract.processingFee, ...pf };
-    }
-    if (req.body.donation) {
-      const don = JSON.parse(req.body.donation);
-      contract.donation = { ...contract.donation, ...don };
-    }
-    if (req.body.securityDeposit) {
-      const sd = JSON.parse(req.body.securityDeposit);
-      contract.securityDeposit = { ...contract.securityDeposit, ...sd };
-    }
-
-    if (req.body.termsAccepted === 'true') {
-      contract.termsAccepted = true;
-      contract.termsAcceptedAt = new Date();
-    }
-
-    if (req.body.signatureBase64) {
-      contract.signature = req.body.signatureBase64;
-      contract.signedAt = new Date();
-    }
-
-    const pf = contract.processingFee;
-    const sd = contract.securityDeposit;
-    if (pf.paid && sd.paid && contract.termsAccepted && contract.signature) {
-      contract.status = 'completed';
-    } else {
-      contract.status = 'draft';
-    }
-
-    contract.updatedBy = req.user.id;
-    await contract.save();
-    res.json({ success: true, contract });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  // If contract already completed, prevent duplicate
+  if (user.contractStatus === 'completed') {
+    throw new AppError('अनुबंध पहले ही पूरा हो चुका है', 400);
   }
-};
 
-// ---------- ADMIN: List all contracts ----------
-exports.getAllContracts = async (req, res) => {
-  try {
-    const { page = 1, limit = 20, role, adminStatus } = req.query;
-    const query = {};
-    if (role) query.role = role;
-    if (adminStatus) query.adminStatus = adminStatus;
+  // Update user's contract-related fields
+  const { processingFee, securityDeposit, signature, agreement } = req.body;
 
-    const contracts = await Contract.find(query)
-      .populate('user', 'fullName email role')
-      .sort('-createdAt')
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-    const total = await Contract.countDocuments(query);
-    res.json({ success: true, contracts, totalPages: Math.ceil(total / limit), currentPage: page });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  // Handle file upload (signature)
+  if (req.file) {
+    user.signature = `/uploads/signatures/${req.file.filename}`;
   }
-};
 
-// ---------- ADMIN: Review a contract (approve/reject) ----------
-exports.reviewContract = async (req, res) => {
-  try {
-    const { adminStatus, adminNotes } = req.body;
-    const contract = await Contract.findById(req.params.id);
-    if (!contract) return res.status(404).json({ success: false, message: 'Contract not found' });
+  if (processingFee) user.processingFee = processingFee;
+  if (securityDeposit) user.securityDeposit = securityDeposit;
+  
+  // Mark contract as completed
+  user.contractStatus = 'completed';
+  user.contractCompletedAt = new Date();
+  user.updatedBy = req.user.id;
 
-    contract.adminStatus = adminStatus || contract.adminStatus;
-    if (adminNotes) contract.adminNotes = adminNotes;
-    contract.reviewedBy = req.user.id;
-    contract.reviewedAt = new Date();
+  await user.save();
 
-    // 🆕 Sync user's contractStatus for instant dashboard access
-    const user = await User.findById(contract.user);
-    if (user) {
-      if (adminStatus === 'approved') {
-        contract.status = 'completed';
-        user.contractStatus = 'completed';
-      } else if (adminStatus === 'rejected') {
-        contract.status = 'rejected';
-        user.contractStatus = 'rejected';
-      }
-      await user.save();
-    }
+  const contract = await Contract.findOne({ role: user.role });
+  
+  res.json({
+    success: true,
+    message: 'अनुबंध सफलतापूर्वक पूरा हुआ',
+    user: {
+      contractStatus: user.contractStatus,
+      contractCompletedAt: user.contractCompletedAt,
+      processingFee: user.processingFee,
+      securityDeposit: user.securityDeposit,
+    },
+  });
+});
 
-    await contract.save();
-    res.json({ success: true, contract });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+// ADMIN: Review / Approve contract
+exports.reviewContract = catchAsync(async (req, res, next) => {
+  const { userId, status, remarks } = req.body;
+  const user = await User.findById(userId);
+  if (!user) throw new AppError('यूज़र नहीं मिला', 404);
+
+  if (status === 'approved') {
+    user.contractStatus = 'completed';
+    user.contractCompletedAt = new Date();
+  } else if (status === 'rejected') {
+    user.contractStatus = 'draft'; // reset to draft
+    user.contractRejectionReason = remarks;
   }
-};
 
-// Export multer middleware for routes
-exports.uploadReceipt = upload.fields([
-  { name: 'processingFeeReceipt', maxCount: 1 },
-  { name: 'donationReceipt', maxCount: 1 },
-  { name: 'securityDepositReceipt', maxCount: 1 },
-  { name: 'signature', maxCount: 1 },
-]);
+  user.contractReviewedBy = req.user.id;
+  user.contractReviewedAt = new Date();
+  await user.save();
+
+  res.json({ success: true, message: `अनुबंध ${status === 'approved' ? 'स्वीकृत' : 'अस्वीकृत'} हुआ` });
+});

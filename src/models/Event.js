@@ -1,18 +1,25 @@
 const mongoose = require('mongoose');
 
-const eventSchema = new mongoose.Schema({
-  title: { type: String, required: true, trim: true },
-  description: { type: String, trim: true },
-  eventDate: { type: Date, required: true },
-  venue: { type: String, trim: true },
-  type: { type: String, enum: ['health_camp', 'blood_donation', 'awareness', 'training', 'other'], default: 'other' },
-  isPaid: { type: Boolean, default: false },
-  registrationFee: { type: Number, default: 0 },
-  image: String,
-  maxParticipants: { type: Number, default: 0 },  // 0 = unlimited
-  registeredCount: { type: Number, default: 0 },
-  status: { type: String, enum: ['upcoming', 'ongoing', 'completed', 'cancelled'], default: 'upcoming' },
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-}, { timestamps: true });
+const eventSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    description: String,
+    eventDate: { type: Date, required: true },
+    location: { type: String, trim: true },                // venue
+    maxParticipants: { type: Number, min: 1 },
+    registeredCount: { type: Number, default: 0 },
+    // registrations could be separate, here we just keep count
+    // Scope fields
+    state: { type: String, trim: true },
+    district: { type: String, trim: true },
+    block: { type: String, trim: true },
+    village: { type: String, trim: true },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  },
+  { timestamps: true }
+);
+
+eventSchema.index({ eventDate: 1 });
+eventSchema.index({ state: 1 });
 
 module.exports = mongoose.model('Event', eventSchema);

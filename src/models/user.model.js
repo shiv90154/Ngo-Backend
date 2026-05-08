@@ -3,22 +3,31 @@ const bcrypt = require('bcrypt');
 
 const roleLevelMap = {
   SUPER_ADMIN: 0,
+
+  // ── NGO Organizational Roles ──────────────────────
   ADDITIONAL_DIRECTOR: 1,
-  STATE_OFFICER: 2,
-  DISTRICT_MANAGER: 3,
+  STATE_DEVELOPMENT_COORDINATOR: 2,
+  DISTRICT_BRANCH_MANAGER: 3,
   DISTRICT_PRESIDENT: 4,
-  FIELD_OFFICER: 5,
-  JILLA_BRANCH_MANAGER: 5,      // same level as FIELD_OFFICER
-  JILLA_ADYAKSH: 5,
-  JILLA_FIELD_OFFICER: 6,
-  BLOCK_OFFICER: 7,
-  VILLAGE_OFFICER: 8,
-  GRAM_BIKAS_ADHIKARI: 9,       // village level agent
-  DOCTOR: 10,
+  DISTRICT_FIELD_COORDINATOR: 5,
+  BAMS_DOCTOR: 5,               // same organisational level as district field coordinator
+  BLOCK_DEVELOPMENT_COORDINATOR: 6,
+  GRAM_DEVELOPMENT_COORDINATOR: 7,
+
+  // ── Sanstha Project Roles (7 core) ───────────────
+  IT_DEVELOPER: 10,
   TEACHER: 10,
-  AGENT: 10,
-  NGO: 11,                       // NGO & Club at lower operational level
-  CLUB: 11,
+  NEWS_EDITOR: 10,
+  AGRICULTURE_CONSULTANCY: 10,
+  FINANCE_SERVICE_CONSULTANCY: 10,
+  NGO_CONSULTANCY: 10,
+  PROJECT_BASED_INTEGRATED_ROLE: 10,
+
+  // ── Vendor / Marketplace ─────────────────────────
+  VENDOR: 11,
+  AGENT: 11,
+
+  // ── User (beneficiary) ──────────────────────────
   USER: 12,
 };
 
@@ -49,22 +58,31 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: [
         'SUPER_ADMIN',
+
+        // ── NGO Organizational ──
         'ADDITIONAL_DIRECTOR',
-        'STATE_OFFICER',
-        'DISTRICT_MANAGER',
+        'STATE_DEVELOPMENT_COORDINATOR',
+        'DISTRICT_BRANCH_MANAGER',
         'DISTRICT_PRESIDENT',
-        'FIELD_OFFICER',
-        'JILLA_BRANCH_MANAGER',
-        'JILLA_ADYAKSH',
-        'JILLA_FIELD_OFFICER',
-        'BLOCK_OFFICER',
-        'VILLAGE_OFFICER',
-        'GRAM_BIKAS_ADHIKARI',
-        'DOCTOR',
+        'DISTRICT_FIELD_COORDINATOR',
+        'BAMS_DOCTOR',
+        'BLOCK_DEVELOPMENT_COORDINATOR',
+        'GRAM_DEVELOPMENT_COORDINATOR',
+
+        // ── Sanstha Project ──
+        'IT_DEVELOPER',
         'TEACHER',
+        'NEWS_EDITOR',
+        'AGRICULTURE_CONSULTANCY',
+        'FINANCE_SERVICE_CONSULTANCY',
+        'NGO_CONSULTANCY',
+        'PROJECT_BASED_INTEGRATED_ROLE',
+
+        // ── Vendor / Marketplace ──
+        'VENDOR',
         'AGENT',
-        'NGO',
-        'CLUB',
+
+        // ── User ──
         'USER',
       ],
       default: 'USER',
@@ -254,7 +272,7 @@ const userSchema = new mongoose.Schema(
       salaryEligible: { type: Boolean, default: false },
     },
 
-    // ========== CONTRACT STATUS (denormalized for fast access) ==========
+    // ========== CONTRACT STATUS ==========
     contractStatus: {
       type: String,
       enum: ['draft', 'completed', 'rejected'],
@@ -383,7 +401,7 @@ userSchema.index({ adsSeen: 1 });
 userSchema.index({ adBlockedCreators: 1 });
 userSchema.index({ 'doctorVerification.verificationStatus': 1 });
 userSchema.index({ 'licenseStats.totalLicensesSold': 1 });
-userSchema.index({ contractStatus: 1 });   // 🆕 for fast contract checks
+userSchema.index({ contractStatus: 1 });
 
 // ========== STATIC METHOD: Generate Unique Referral Code ==========
 userSchema.statics.generateUniqueReferralCode = async function () {

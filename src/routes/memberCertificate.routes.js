@@ -1,16 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const certController = require('../controllers/memberCertificate.controller');
 const { protect, restrictTo } = require('../middleware');
+const memberCertificateController = require('../controllers/memberCertificate.controller');
+const { NGO_ORGANIZATIONAL_ROLES } = require('../config/roles');
 
-// User
-router.get('/my', protect, certController.getMyCertificates);
+const ALLOWED = ['SUPER_ADMIN', ...NGO_ORGANIZATIONAL_ROLES];
 
-// Admin
-router.post('/generate', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), certController.generateCertificate);
-router.get('/all', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), certController.getAllCertificates);
-
-// Public verification (no auth)
-router.get('/verify/:verificationCode', certController.verifyCertificate);
+router.post('/generate', protect, restrictTo(...ALLOWED), memberCertificateController.generateCertificate);
+router.get('/all', protect, restrictTo(...ALLOWED), memberCertificateController.getAllCertificates);
+router.get('/my', protect, memberCertificateController.getMyCertificates);
+router.get('/verify/:code', protect, memberCertificateController.verifyCertificate);
 
 module.exports = router;

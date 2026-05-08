@@ -1,19 +1,19 @@
 const express = require('express');
 const router = express.Router();
-const eventController = require('../controllers/event.controller');
 const { protect, restrictTo } = require('../middleware');
+const eventController = require('../controllers/event.controller');
+const { NGO_ORGANIZATIONAL_ROLES } = require('../config/roles');
 
-// Public
-router.get('/upcoming', eventController.getUpcomingEvents);
+const ALLOWED = ['SUPER_ADMIN', ...NGO_ORGANIZATIONAL_ROLES];
 
-// User
+router.get('/upcoming', protect, eventController.getUpcomingEvents);
+router.get('/all', protect, eventController.getAllEvents);
 router.post('/register', protect, eventController.registerForEvent);
+router.get('/:eventId/registrations', protect, eventController.getEventRegistrations);
 
-// Admin
-router.post('/', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), eventController.createEvent);
-router.put('/:id', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), eventController.updateEvent);
-router.delete('/:id', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), eventController.deleteEvent);
-router.get('/all', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), eventController.getAllEvents);
-router.get('/:id/registrations', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), eventController.getEventRegistrations);
+// Admin / NGO Management
+router.post('/', protect, restrictTo(...ALLOWED), eventController.createEvent);
+router.put('/:id', protect, restrictTo(...ALLOWED), eventController.updateEvent);
+router.delete('/:id', protect, restrictTo(...ALLOWED), eventController.deleteEvent);
 
 module.exports = router;

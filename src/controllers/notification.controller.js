@@ -94,7 +94,6 @@ exports.deleteNotification = async (req, res) => {
 // ======================
 const safeCreate = async (data) => {
   try {
-    // Don't notify if sender and recipient are the same person
     if (data.recipient.toString() === data.sender?.toString()) return;
     await Notification.create(data);
   } catch (err) {
@@ -172,7 +171,6 @@ exports.sendAgentNotification = async (req, res) => {
     const recipient = await User.findById(recipientId);
     if (!recipient) return res.status(404).json({ success: false, message: 'Recipient not found' });
 
-    // Optional: client relationship check can be added here
     await safeCreate({
       recipient: recipientId,
       sender: senderId,
@@ -227,7 +225,6 @@ exports.notifyPrescriptionAdded = async (prescription) => {
   }
 };
 
-// 🆕 Doctor verification approved/rejected
 exports.notifyDoctorVerification = async (doctorId, status, reason) => {
   try {
     const doctor = await User.findById(doctorId);
@@ -282,7 +279,6 @@ exports.notifyLicensePurchase = async (purchaseId) => {
       .populate('soldBy', 'fullName email')
       .populate('licenseType', 'name incentiveAmount');
     if (!purchase) return;
-    // Notify the seller
     await safeCreate({
       recipient: purchase.soldBy._id,
       sender: null,
@@ -322,7 +318,6 @@ exports.notifyMeetingCreated = async (meetingId) => {
   try {
     const meeting = await Meeting.findById(meetingId).populate('host participants');
     if (!meeting) return;
-    // Notify each participant (except host)
     for (const participant of meeting.participants) {
       if (participant._id.toString() === meeting.host._id.toString()) continue;
       await safeCreate({
@@ -400,7 +395,6 @@ exports.notifyCourseEnrolled = async (enrollment) => {
         courseId: course._id,
       },
     });
-    // Also notify the student
     await safeCreate({
       recipient: enrollment.student,
       sender: null,
@@ -450,14 +444,13 @@ exports.notifyTestResult = async (attemptId) => {
   }
 };
 
-// 🆕 Education program enrollment (Class 6‑12)
 exports.notifyEducationProgramEnrolled = async (enrollment) => {
   try {
     const student = await User.findById(enrollment.student);
     const program = await EducationProgram.findById(enrollment.program);
     if (!student || !program) return;
     await safeCreate({
-      recipient: enrollment.soldBy, // Gram Vikas Adhikari who enrolled the student
+      recipient: enrollment.soldBy,
       sender: null,
       type: 'education_program_sold',
       metadata: {
