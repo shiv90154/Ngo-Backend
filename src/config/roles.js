@@ -1,4 +1,3 @@
-// config/roles.js (नई फ़ाइल – बैकएंड में कहीं भी रख सकते हैं, e.g., src/config/roles.js)
 const NGO_ORGANIZATIONAL_ROLES = [
   'ADDITIONAL_DIRECTOR',
   'STATE_DEVELOPMENT_COORDINATOR',
@@ -7,7 +6,7 @@ const NGO_ORGANIZATIONAL_ROLES = [
   'DISTRICT_FIELD_COORDINATOR',
   'BAMS_DOCTOR',
   'BLOCK_DEVELOPMENT_COORDINATOR',
-  'GRAM_DEVELOPMENT_COORDINATOR',
+  'GRAM_DEVELOPMENT_COORDINATOR',   // <-- यह होना चाहिए
 ];
 
 module.exports = { NGO_ORGANIZATIONAL_ROLES };

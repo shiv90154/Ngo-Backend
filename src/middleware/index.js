@@ -3,6 +3,7 @@ const restrictTo = require('./authorize');
 const { loginLimiter, otpLimiter } = require('./rateLimiter');
 const errorHandler = require('./errorHandler');
 const notFound = require('./notFound');
+const newsUpload = require('./newsUpload');           // 🆕
 
 module.exports = {
   protect,
@@ -12,4 +13,5 @@ module.exports = {
   rateLimiter: { loginLimiter, otpLimiter },
   errorHandler,
   notFound,
+  newsUpload,                                        // 🆕
 };
