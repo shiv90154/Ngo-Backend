@@ -27,6 +27,7 @@ const serviceRequestRoutes = require('./serviceRequest.routes');
 const contributionRoutes = require('./contribution.routes');
 const newsRoutes = require('./news.routes');
 const internshipRoutes = require('./internship.routes');   // 🆕 Internship
+const productSaleRoutes = require('./productSale.routes'); // 🆕 Product Sale (Licenses + Education)
 const searchController = require('../controllers/search.controller');
 
 // ---------- Health Check ----------
@@ -60,6 +61,7 @@ router.use('/member-certificates', memberCertificateRoutes);
 router.use('/events', eventRoutes);
 router.use('/expenses', expenseRoutes);
 router.use('/contributions', contributionRoutes);
+router.use('/products', productSaleRoutes);               // 🆕 Product Sale (Licenses + Education Programs)
 router.get('/search', searchController.globalSearch);
 
 module.exports = router;

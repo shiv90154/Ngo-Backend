@@ -1,3 +1,4 @@
+// backend/src/controllers/auth.controller.js
 const User = require('../models/user.model');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
@@ -9,8 +10,6 @@ const { validationResult } = require('express-validator');
 // ✅ Final Role List (Client Approved)
 const VALID_ROLES = [
   'SUPER_ADMIN',
-
-  // ── NGO Organizational Roles ──
   'ADDITIONAL_DIRECTOR',
   'STATE_DEVELOPMENT_COORDINATOR',
   'DISTRICT_BRANCH_MANAGER',
@@ -19,8 +18,6 @@ const VALID_ROLES = [
   'BAMS_DOCTOR',
   'BLOCK_DEVELOPMENT_COORDINATOR',
   'GRAM_DEVELOPMENT_COORDINATOR',
-
-  // ── Sanstha Project Roles ──
   'IT_DEVELOPER',
   'TEACHER',
   'NEWS_EDITOR',
@@ -28,12 +25,8 @@ const VALID_ROLES = [
   'FINANCE_SERVICE_CONSULTANCY',
   'NGO_CONSULTANCY',
   'PROJECT_BASED_INTEGRATED_ROLE',
-
-  // ── Vendor / Marketplace ──
   'VENDOR',
   'AGENT',
-
-  // ── User ──
   'USER',
 ];
 
@@ -73,7 +66,7 @@ exports.register = async (req, res) => {
       fatherName, motherName, dob, dateOfBirth, gender,
       aadhaarNumber, aadharCard, panNumber, panCard, voterId, passportNumber,
       state, district, block, village, pincode, fullAddress,
-      reportsTo, sponsorId,
+      reportsTo, sponsorId, sponsorReferral,   // 🆕 sponsorReferral added
       // TEACHER
       specialization, qualifications, experienceYears,
       // DOCTOR / BAMS
@@ -114,6 +107,22 @@ exports.register = async (req, res) => {
       return res.status(400).json({ success: false, message: 'User already exists' });
     }
 
+    // ── 🔍 SPONSOR RESOLUTION ──
+    let resolvedSponsor = null;
+    // Priority: direct sponsorId (ObjectId) or sponsorReferral (code)
+    if (sponsorId) {
+      resolvedSponsor = await User.findById(sponsorId);
+      if (!resolvedSponsor) {
+        return res.status(400).json({ success: false, message: 'Invalid sponsor ID' });
+      }
+    } else if (sponsorReferral && sponsorReferral.trim() !== '') {
+      resolvedSponsor = await User.findOne({ referralCode: sponsorReferral.trim() });
+      if (!resolvedSponsor) {
+        return res.status(400).json({ success: false, message: 'Invalid sponsor referral code' });
+      }
+    }
+    // If no sponsor at all, leave as null
+
     const otp = generateOTP();
     const hashedOtp = await hashOTP(otp);
 
@@ -152,7 +161,7 @@ exports.register = async (req, res) => {
       otp: hashedOtp,
       otpExpire: Date.now() + 5 * 60 * 1000,
       reportsTo: reportsTo || null,
-      sponsorId: sponsorId || null,
+      sponsorId: resolvedSponsor ? resolvedSponsor._id : null,   // 🆕 set from found sponsor
       createdBy: req.user ? req.user.id : null,
       updatedBy: req.user ? req.user.id : null,
       aiUsage: { diseaseDetectionCount: 0, aiTokensRemaining: 10 },
@@ -271,6 +280,18 @@ exports.register = async (req, res) => {
         if (degreeCert) user.doctorVerification.degreeCertificate = degreeCert;
         if (regCert) user.doctorVerification.registrationCertificate = regCert;
       }
+    }
+
+    // ── 🆕 UPDATE SPONSOR'S TEAM & BINARY PLACEMENT ──
+    if (resolvedSponsor) {
+      resolvedSponsor.teamSize = (resolvedSponsor.teamSize || 0) + 1;
+      // Optional: binary placement (left -> right)
+      if (!resolvedSponsor.leftChild) {
+        resolvedSponsor.leftChild = user._id;
+      } else if (!resolvedSponsor.rightChild) {
+        resolvedSponsor.rightChild = user._id;
+      }
+      await resolvedSponsor.save();
     }
 
     await user.save();
