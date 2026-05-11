@@ -1,3 +1,4 @@
+// backend/src/routes/contract.routes.js
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
@@ -15,13 +16,41 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// Admin routes
-router.post('/', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), contractController.createOrUpdateContract);
-router.get('/all', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), contractController.getAllContracts);
-router.patch('/:userId/review', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), contractController.reviewContract);
+// ─── Admin routes ───
+// Create or update contract for a role
+router.post(
+  '/',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  contractController.createOrUpdateContract
+);
 
-// User routes
+// Get all contracts
+router.get(
+  '/all',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  contractController.getAllContracts
+);
+
+// Review/approve user contract
+router.patch(
+  '/:userId/review',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  contractController.reviewContract
+);
+
+// ─── User routes ───
+// Get my contract (based on user's role)
 router.get('/my', protect, contractController.getMyContract);
-router.put('/my', protect, upload.single('signature'), contractController.updateMyContract);
+
+// Sign / complete my contract
+router.put(
+  '/my',
+  protect,
+  upload.single('signature'),
+  contractController.updateMyContract
+);
 
 module.exports = router;

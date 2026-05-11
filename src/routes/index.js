@@ -1,3 +1,4 @@
+// backend/src/routes/index.js
 const express = require('express');
 const router = express.Router();
 
@@ -20,14 +21,16 @@ const dashboardRoutes = require('./dashboard.routes');
 const beneficiaryRoutes = require('./beneficiary.routes');
 const donationRoutes = require('./donation.routes');
 const campaignRoutes = require('./campaign.routes');
+const memberRoutes = require('./member.routes');
 const memberCertificateRoutes = require('./memberCertificate.routes');
 const eventRoutes = require('./event.routes');
 const expenseRoutes = require('./expense.routes');
 const serviceRequestRoutes = require('./serviceRequest.routes');
 const contributionRoutes = require('./contribution.routes');
 const newsRoutes = require('./news.routes');
-const internshipRoutes = require('./internship.routes');   // 🆕 Internship
-const productSaleRoutes = require('./productSale.routes'); // 🆕 Product Sale (Licenses + Education)
+const internshipRoutes = require('./internship.routes');
+const productSaleRoutes = require('./productSale.routes');
+const contractRoutes = require('./contract.routes');             // 🆕 Contracts
 const searchController = require('../controllers/search.controller');
 
 // ---------- Health Check ----------
@@ -42,7 +45,7 @@ router.use('/education', educationRoutes);
 router.use('/medicines', medicineRoutes);
 router.use('/media', mediaRoutes);
 router.use('/news', newsRoutes);
-router.use('/internships', internshipRoutes);            // 🆕 Internship endpoints
+router.use('/internships', internshipRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/admin', adminRoutes);
 router.use('/liveclass', liveClassRoutes);
@@ -57,11 +60,13 @@ router.use('/dashboard', dashboardRoutes);
 router.use('/beneficiaries', beneficiaryRoutes);
 router.use('/donations', donationRoutes);
 router.use('/campaigns', campaignRoutes);
+router.use('/members', memberRoutes);
 router.use('/member-certificates', memberCertificateRoutes);
 router.use('/events', eventRoutes);
 router.use('/expenses', expenseRoutes);
 router.use('/contributions', contributionRoutes);
-router.use('/products', productSaleRoutes);               // 🆕 Product Sale (Licenses + Education Programs)
+router.use('/products', productSaleRoutes);
+router.use('/contracts', contractRoutes);                         
 router.get('/search', searchController.globalSearch);
 
 module.exports = router;

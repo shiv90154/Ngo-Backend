@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 
 const userController = require('../controllers/auth.controller');
-const User = require('../models/user.model');  // 🆕 for verify-sponsor route
+const User = require('../models/user.model');
 const { protect, restrictTo, rateLimiter } = require('../middleware');
 const {
   registerValidation,
@@ -15,7 +15,7 @@ const {
   resetPasswordValidation,
 } = require('../validators/authValidator');
 
-// Multer setup (unchanged)
+// Multer setup
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const tempDir = path.join(__dirname, '../../temp_uploads');
@@ -45,7 +45,7 @@ router.post(
   userController.register
 );
 
-// 🆕 Verify Sponsor Referral Code
+// Verify Sponsor Referral Code
 router.get('/verify-sponsor/:code', async (req, res) => {
   const sponsor = await User.findOne({ referralCode: req.params.code }).select('fullName');
   if (!sponsor) return res.status(404).json({ success: false, message: 'Invalid referral code' });
@@ -73,7 +73,7 @@ router.put(
   userController.updateProfile
 );
 
-// Subordinates – only NGO organizational roles can view subordinates
+// Subordinates – only NGO organizational roles
 router.get('/subordinates', protect, userController.getSubordinates);
 router.get(
   '/subordinates/:id',
@@ -84,10 +84,10 @@ router.get(
   userController.getSubordinates
 );
 
-// Wallet (any logged-in user)
+// Wallet
 router.post('/wallet', protect, userController.updateWallet);
 
-// Health Records – BAMS_DOCTOR included
+// Health Records
 router.post('/health-records', protect, upload.single('file'), userController.addHealthRecord);
 router.post(
   '/health-records/user/:userId',
@@ -121,20 +121,24 @@ router.post('/projects', protect, userController.addProject);
 // E-commerce Store Products
 router.post('/store-products', protect, upload.single('image'), userController.addStoreProduct);
 
-// AI, MLM, Subscription – only SUPER_ADMIN
+// AI Tokens
 router.put('/ai/tokens', protect, restrictTo('SUPER_ADMIN'), userController.updateAITokens);
 router.post('/ai/usage', protect, userController.incrementAIUsage);
+
+// Subscription History
 router.post(
   '/subscription/history',
   protect,
   restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
   userController.addSubscriptionHistory
 );
+
+// Incentive Payout (renamed from MLM Payout)
 router.put(
-  '/mlm/payout',
+  '/incentive/payout',
   protect,
   restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
-  userController.updateMLMPayout
+  userController.updateIncentivePayout
 );
 
 // Restore user
@@ -171,6 +175,8 @@ router.post(
              'DISTRICT_BRANCH_MANAGER', 'DISTRICT_PRESIDENT'),
   userController.assignReporting
 );
+
+// User search
 router.get('/search', protect, async (req, res) => {
   const { email } = req.query;
   if (!email) return res.status(400).json({ success: false, message: 'Email query required' });

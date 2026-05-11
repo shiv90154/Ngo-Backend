@@ -1,3 +1,4 @@
+// backend/src/controllers/contract.controller.js
 const Contract = require('../models/Contract');
 const User = require('../models/user.model');
 const catchAsync = require('../utils/catchAsync');
@@ -8,7 +9,7 @@ exports.createOrUpdateContract = catchAsync(async (req, res, next) => {
   const { role, title, content, terms, requiredFields } = req.body;
   if (!role || !title || !content) throw new AppError('भूमिका, शीर्षक और सामग्री आवश्यक हैं', 400);
 
-  // Upsert – अगर पहले से है तो अपडेट करो, नहीं तो बनाओ
+  // Upsert
   const contract = await Contract.findOneAndUpdate(
     { role },
     { title, content, terms, requiredFields, updatedBy: req.user.id },
@@ -30,22 +31,10 @@ exports.getMyContract = catchAsync(async (req, res, next) => {
 
   const contract = await Contract.findOne({ role: user.role, isActive: true });
   if (!contract) {
-    // अगर कोई कॉन्ट्रैक्ट नहीं है तो खाली भेजो
     return res.json({ success: true, contract: null, message: 'इस भूमिका के लिए कोई अनुबंध नहीं है' });
   }
 
-  // Check user's current contract status
-  const userContractData = {
-    contract,
-    userStatus: {
-      contractStatus: user.contractStatus,
-      contractCompletedAt: user.contractCompletedAt,
-      processingFee: user.processingFee,
-      securityDeposit: user.securityDeposit,
-    },
-  };
-
-  res.json({ success: true, data: userContractData });
+  res.json({ success: true, data: { contract, userStatus: user.contractStatus } });
 });
 
 // USER: Sign / Complete contract
@@ -53,31 +42,25 @@ exports.updateMyContract = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user.id);
   if (!user) throw new AppError('यूज़र नहीं मिला', 404);
 
-  // If contract already completed, prevent duplicate
   if (user.contractStatus === 'completed') {
     throw new AppError('अनुबंध पहले ही पूरा हो चुका है', 400);
   }
 
-  // Update user's contract-related fields
-  const { processingFee, securityDeposit, signature, agreement } = req.body;
+  const { processingFee, securityDeposit } = req.body;
 
-  // Handle file upload (signature)
   if (req.file) {
     user.signature = `/uploads/signatures/${req.file.filename}`;
   }
 
   if (processingFee) user.processingFee = processingFee;
   if (securityDeposit) user.securityDeposit = securityDeposit;
-  
-  // Mark contract as completed
+
   user.contractStatus = 'completed';
   user.contractCompletedAt = new Date();
   user.updatedBy = req.user.id;
 
   await user.save();
 
-  const contract = await Contract.findOne({ role: user.role });
-  
   res.json({
     success: true,
     message: 'अनुबंध सफलतापूर्वक पूरा हुआ',
@@ -100,7 +83,7 @@ exports.reviewContract = catchAsync(async (req, res, next) => {
     user.contractStatus = 'completed';
     user.contractCompletedAt = new Date();
   } else if (status === 'rejected') {
-    user.contractStatus = 'draft'; // reset to draft
+    user.contractStatus = 'draft';
     user.contractRejectionReason = remarks;
   }
 

@@ -3,7 +3,7 @@ const SubscriptionPayment = require('../models/SubscriptionPayment');
 const User = require('../models/user.model');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
-const { calculateCommission } = require('../services/commission.service');   // MLM
+const { calculateCommission } = require('../services/mlmEngine');   // MLM
 const mailer = require('../utils/sendEmail');                                // 🆕 email service
 
 const razorpay = new Razorpay({
