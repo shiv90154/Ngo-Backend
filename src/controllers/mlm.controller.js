@@ -76,3 +76,32 @@ exports.getMyEarnings = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
+exports.getNetwork = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Recursive function to fetch children
+    const buildTree = async (parentId) => {
+      const children = await User.find({ sponsorId: parentId, isDeleted: false })
+        .select('fullName email phone role referralCode totalCommissionEarned teamSize')
+        .lean();
+
+      for (let child of children) {
+        child.children = await buildTree(child._id);
+      }
+      return children;
+    };
+
+    const rootUser = await User.findById(userId)
+      .select('fullName email phone role referralCode totalCommissionEarned teamSize')
+      .lean();
+
+    if (!rootUser) return res.status(404).json({ success: false, message: 'User not found' });
+
+    rootUser.children = await buildTree(userId);
+
+    res.json({ success: true, network: rootUser });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};

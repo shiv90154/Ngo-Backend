@@ -1,3 +1,4 @@
+// backend/src/routes/mlm.routes.js
 const express = require('express');
 const router = express.Router();
 const { protect, restrictTo } = require('../middleware');
@@ -6,7 +7,10 @@ const mlmController = require('../controllers/mlm.controller');
 // User routes
 router.get('/earnings', protect, mlmController.getMyEarnings);
 router.get('/downline', protect, mlmController.getDownline);
-router.get('/downline/:userId', protect, mlmController.getDownline);
+router.get('/downline/:userId', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), mlmController.getDownline);
+
+// 🆕 Network tree – full recursive downline (for user's own view)
+router.get('/network', protect, mlmController.getNetwork);
 
 // Admin routes
 router.get('/commissions', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), mlmController.getCommissions);

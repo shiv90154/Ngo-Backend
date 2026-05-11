@@ -57,6 +57,7 @@ router.post(
 router.get('/posts/:id', protect, mediaController.getPost);
 router.put('/posts/:id', protect, validate(mediaValidator.updatePost), mediaController.updatePost);
 router.delete('/posts/:id', protect, mediaController.deletePost);
+router.get('/users/:userId/profile', protect, mediaController.getCreatorProfile);
 router.get('/users/:userId/posts', protect, mediaController.getUserPosts);
 
 router.get('/users/:userId/profile', protect, mediaController.getCreatorProfile)
@@ -82,5 +83,6 @@ router.post('/become-creator', protect, mediaController.becomeCreator);
 
 // Ads
 router.post('/ads/track-click', protect, mediaController.trackAdClick);
+
 
 module.exports = router;

@@ -914,7 +914,11 @@ const getSellerProductById = async (req, res, next) => {
         next(error);
     }
 };
-
+/**
+ * @desc    Create seller product
+ * @route   POST /agriculture/seller/products
+ * @access  Private
+ */
 /**
  * @desc    Create seller product
  * @route   POST /agriculture/seller/products
@@ -924,8 +928,44 @@ const createSellerProduct = async (req, res, next) => {
     try {
         if (!ensureSellerAccess(req, res)) return;
 
+        // Debug: Check if file is received
+        console.log('Request file:', req.file);
+        console.log('Request body:', req.body);
+
+        // Handle image file if uploaded
+        let imageUrl = '';
+        if (req.file) {
+            try {
+                const fs = require('fs');
+                const path = require('path');
+
+                // Ensure products directory exists
+                const productsDir = path.join(__dirname, '../uploads/products');
+                if (!fs.existsSync(productsDir)) {
+                    fs.mkdirSync(productsDir, { recursive: true });
+                }
+
+                const extension = path.extname(req.file.filename);
+                const permanentFileName = `product-${Date.now()}${extension}`;
+                const permanentPath = path.join(productsDir, permanentFileName);
+
+                fs.renameSync(req.file.path, permanentPath);
+                imageUrl = `/uploads/products/${permanentFileName}`;
+            } catch (fileError) {
+                console.error('File handling error:', fileError);
+            }
+        }
+
         const payload = {
-            ...req.body,
+            name: req.body.name,
+            description: req.body.description || '',
+            category: req.body.category,
+            price: Number(req.body.price),
+            quantity: Number(req.body.quantity),
+            unit: req.body.unit,
+            location: req.body.location || '',
+            imageUrl: imageUrl,
+            isOrganic: req.body.isOrganic === 'true',
             seller: req.user.id,
             isAvailable: true
         };
@@ -947,7 +987,7 @@ const createSellerProduct = async (req, res, next) => {
                 quantity: product.quantity,
                 unit: product.unit,
                 location: product.location || '',
-                imageUrl: product.imageUrl || product.images?.[0] || '',
+                imageUrl: product.imageUrl || '',
                 isOrganic: !!product.isOrganic,
                 approvalStatus: product.approvalStatus || 'approved',
                 status: product.isAvailable ? 'active' : 'inactive',
@@ -955,10 +995,10 @@ const createSellerProduct = async (req, res, next) => {
             }
         });
     } catch (error) {
+        console.error('Create product error:', error);
         next(error);
     }
 };
-
 /**
  * @desc    Update seller product
  * @route   PUT /agriculture/seller/products/:id
@@ -977,7 +1017,33 @@ const updateSellerProduct = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'Product not found' });
         }
 
-        Object.assign(product, req.body);
+        // Handle new image file if uploaded
+        if (req.file) {
+            // Delete old image if exists
+            if (product.imageUrl) {
+                const oldImagePath = require('path').join(__dirname, '..', product.imageUrl);
+                if (require('fs').existsSync(oldImagePath)) {
+                    require('fs').unlinkSync(oldImagePath);
+                }
+            }
+
+            const extension = require('path').extname(req.file.filename);
+            const permanentFileName = `product-${Date.now()}${extension}`;
+            const permanentPath = require('path').join(__dirname, '../uploads/products', permanentFileName);
+
+            require('fs').renameSync(req.file.path, permanentPath);
+            product.imageUrl = `/uploads/products/${permanentFileName}`;
+        }
+
+        // Update other fields
+        if (req.body.name) product.name = req.body.name;
+        if (req.body.description) product.description = req.body.description;
+        if (req.body.category) product.category = req.body.category;
+        if (req.body.price) product.price = Number(req.body.price);
+        if (req.body.quantity) product.quantity = Number(req.body.quantity);
+        if (req.body.unit) product.unit = req.body.unit;
+        if (req.body.location) product.location = req.body.location;
+        if (req.body.isOrganic !== undefined) product.isOrganic = req.body.isOrganic === 'true';
 
         if (Product.schema.path('approvalStatus')) {
             product.approvalStatus = 'pending';
@@ -996,7 +1062,7 @@ const updateSellerProduct = async (req, res, next) => {
                 quantity: product.quantity,
                 unit: product.unit,
                 location: product.location || '',
-                imageUrl: product.imageUrl || product.images?.[0] || '',
+                imageUrl: product.imageUrl || '',
                 isOrganic: !!product.isOrganic,
                 approvalStatus: product.approvalStatus || 'approved',
                 status: product.isAvailable ? 'active' : 'inactive',
@@ -1017,7 +1083,7 @@ const deleteSellerProduct = async (req, res, next) => {
     try {
         if (!ensureSellerAccess(req, res)) return;
 
-        const product = await Product.findOneAndDelete({
+        const product = await Product.findOne({
             _id: req.params.id,
             seller: req.user.id
         });
@@ -1025,6 +1091,19 @@ const deleteSellerProduct = async (req, res, next) => {
         if (!product) {
             return res.status(404).json({ success: false, message: 'Product not found' });
         }
+
+        // Delete product image if exists
+        if (product.imageUrl) {
+            const imagePath = require('path').join(__dirname, '..', product.imageUrl);
+            if (require('fs').existsSync(imagePath)) {
+                require('fs').unlinkSync(imagePath);
+            }
+        }
+
+        await Product.findOneAndDelete({
+            _id: req.params.id,
+            seller: req.user.id
+        });
 
         res.status(200).json({
             success: true,
@@ -1034,7 +1113,6 @@ const deleteSellerProduct = async (req, res, next) => {
         next(error);
     }
 };
-
 // ==================== EXPORTS ====================
 
 module.exports = {

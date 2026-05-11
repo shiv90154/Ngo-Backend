@@ -1,3 +1,4 @@
+// backend/src/controllers/admin.controller.js
 const asyncHandler = require('express-async-handler');
 const User = require('../models/user.model');
 const Setting = require('../models/Setting');
@@ -16,16 +17,18 @@ const CommissionSplit = require('../models/CommissionSplit');
 const EducationProgram = require('../models/EducationProgram');
 const Meeting = require('../models/Meeting');
 const WeeklyContribution = require('../models/WeeklyContribution');
+const ProductSale = require('../models/ProductSale');
 
 // ---------- DASHBOARD STATS ----------
 exports.getStats = asyncHandler(async (req, res) => {
   const [
     totalUsers, activeUsers, doctors, teachers, totalPosts, totalAppointments,
-    totalTransactions, activeLoans, totalCourses, totalEnrollments, recentUsers
+    totalTransactions, activeLoans, totalCourses, totalEnrollments,
+    totalLicenses, totalProductSales, recentUsers
   ] = await Promise.all([
     User.countDocuments(),
     User.countDocuments({ isActive: true }),
-    User.countDocuments({ role: 'DOCTOR' }),
+    User.countDocuments({ role: 'BAMS_DOCTOR' }),
     User.countDocuments({ role: 'TEACHER' }),
     MediaPost.countDocuments(),
     Appointment.countDocuments(),
@@ -33,13 +36,16 @@ exports.getStats = asyncHandler(async (req, res) => {
     Loan.countDocuments({ status: 'active' }),
     Course.countDocuments(),
     Enrollment.countDocuments(),
+    LicenseType.countDocuments({ isActive: true }),
+    ProductSale.countDocuments(),
     User.find().sort('-createdAt').limit(5).select('fullName email role createdAt')
   ]);
   res.json({
     success: true,
     stats: {
       totalUsers, activeUsers, doctors, teachers, totalPosts,
-      totalAppointments, totalTransactions, activeLoans, totalCourses, totalEnrollments
+      totalAppointments, totalTransactions, activeLoans, totalCourses, totalEnrollments,
+      totalLicenses, totalProductSales
     },
     recentUsers
   });
@@ -83,6 +89,7 @@ exports.getUsers = asyncHandler(async (req, res) => {
   const users = await User.find(query)
     .select('-password -otp -otpExpire')
     .populate('reportsTo', 'fullName email role')
+    .populate('sponsorId', 'fullName email role')
     .sort({ hierarchyLevel: 1, createdAt: -1 })
     .limit(limit * 1)
     .skip((page - 1) * limit);
@@ -108,7 +115,7 @@ exports.getUser = asyncHandler(async (req, res) => {
 exports.updateUser = asyncHandler(async (req, res) => {
   const user = await User.findById(req.params.id);
   if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-  const allowedFields = ['role', 'modules', 'isActive', 'reportsTo', 'sponsorId', 'hierarchyLevel'];
+  const allowedFields = ['role', 'modules', 'isActive', 'reportsTo', 'sponsorId', 'hierarchyLevel', 'incentivePayoutInfo'];
   allowedFields.forEach(field => {
     if (req.body[field] !== undefined) user[field] = req.body[field];
   });
@@ -138,7 +145,7 @@ exports.deleteUser = asyncHandler(async (req, res) => {
 // ---------- HIERARCHY ----------
 exports.getHierarchy = asyncHandler(async (req, res) => {
   const users = await User.find({ isDeleted: false })
-    .select('fullName role hierarchyLevel reportsTo email')
+    .select('fullName role hierarchyLevel reportsTo email sponsorId')
     .sort('hierarchyLevel');
   res.json({ success: true, users });
 });
@@ -246,13 +253,14 @@ exports.sendGlobalNotification = asyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, message: 'Title and message are required' });
   }
   const users = await User.find({ isActive: true });
-  const notifications = users.map(user => ({
-    recipient: user._id,
-    sender: req.user.id,
-    type: 'global',
-    metadata: { title, message }
-  }));
-  await Notification.insertMany(notifications);
+  await Notification.insertMany(
+    users.map(user => ({
+      recipient: user._id,
+      sender: req.user.id,
+      type: 'global',
+      metadata: { title, message }
+    }))
+  );
   res.json({ success: true, message: `Sent to ${users.length} users` });
 });
 
@@ -367,6 +375,29 @@ exports.updateEducationProgram = asyncHandler(async (req, res) => {
   if (incentive !== undefined) program.incentive = incentive;
   await program.save();
   res.json({ success: true, program });
+});
+
+// ======================
+// ALL PRODUCT SALES (Admin view)
+// ======================
+exports.getAllProductSales = asyncHandler(async (req, res) => {
+  const { page = 1, limit = 20 } = req.query;
+  const sales = await ProductSale.find()
+    .sort('-purchaseDate')
+    .populate('licenseType', 'name')
+    .populate('educationProgram', 'title')
+    .populate('soldBy', 'fullName email role')
+    .populate('customer', 'fullName email')
+    .limit(limit * 1)
+    .skip((page - 1) * limit);
+  const total = await ProductSale.countDocuments();
+  res.json({
+    success: true,
+    sales,
+    totalPages: Math.ceil(total / limit),
+    currentPage: parseInt(page),
+    total
+  });
 });
 
 // ======================

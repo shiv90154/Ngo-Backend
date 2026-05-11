@@ -34,7 +34,6 @@ router.get(
   healthcareController.getDoctorAppointments
 );
 router.get('/appointments/:id', protect, healthcareController.getAppointmentById);
-
 // ─── प्रिस्क्रिप्शन ───
 router.post(
   '/prescriptions',
@@ -67,6 +66,7 @@ router.delete('/records/:id', protect, healthcareController.deleteHealthRecord);
 
 // ─── डॉक्टर सर्च और वेरिफिकेशन ───
 router.get('/doctors/search', protect, healthcareController.searchDoctors);
+router.get('/doctors/:id', protect, healthcareController.getDoctorById);
 router.get(
   '/doctors/pending',
   protect,

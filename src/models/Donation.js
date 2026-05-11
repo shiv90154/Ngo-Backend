@@ -1,22 +1,25 @@
+// backend/src/models/Donation.js (unchanged, already complete)
 const mongoose = require('mongoose');
 
 const donationSchema = new mongoose.Schema(
   {
-    donorName: { type: String, trim: true },               // optional, अनाम हो सकता है
+    donorName: { type: String, trim: true },
     email: { type: String, trim: true, lowercase: true },
     amount: { type: Number, required: true, min: 0 },
-    purpose: { type: String, trim: true },                 // e.g., "शिक्षा", "स्वास्थ्य"
+    purpose: { type: String, trim: true },
     date: { type: Date, default: Date.now },
     type: { type: String, enum: ['online', 'cash'], default: 'online' },
-    receiptUrl: String,                                    // generated PDF/UUID
-    // Scope fields (filled automatically via scopeFilter middleware)
+    receiptUrl: String,
+    // Scope fields
     state: { type: String, trim: true },
     district: { type: String, trim: true },
     block: { type: String, trim: true },
     village: { type: String, trim: true },
-    // Metadata
-    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // donor (if registered)
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },           // NGO officer who created entry
+    // Razorpay transaction id
+    transactionId: { type: String, default: null },
+    // Ref to donor (if logged in)
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   { timestamps: true }
 );

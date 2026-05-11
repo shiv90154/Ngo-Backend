@@ -1,7 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const router = express.Router();
-
+const upload = require('../middleware/upload');
 const {
     // Marketplace
     getAllProducts,
@@ -98,9 +98,10 @@ router.get('/seller/orders/:orderId/invoice', downloadInvoice);
 router.post('/seller/orders/:orderId/contact-buyer', contactBuyer);
 
 // ---------------- SELLER PRODUCTS ----------------
-router.route('/seller/products')
-    .get(getSellerProducts)
-    .post(createSellerProduct);
+router.route('/seller/products').get(getSellerProducts)
+
+// Frontend sends 'productImage' as the field name
+router.post('/seller/products', upload.single('productImage'), createSellerProduct);
 
 router.route('/seller/products/:id')
     .get(getSellerProductById)

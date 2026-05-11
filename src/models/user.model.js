@@ -1,20 +1,17 @@
+// backend/src/models/user.model.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 
 const roleLevelMap = {
   SUPER_ADMIN: 0,
-
-  // ── NGO Organizational Roles ──────────────────────
   ADDITIONAL_DIRECTOR: 1,
   STATE_DEVELOPMENT_COORDINATOR: 2,
   DISTRICT_BRANCH_MANAGER: 3,
   DISTRICT_PRESIDENT: 4,
   DISTRICT_FIELD_COORDINATOR: 5,
-  BAMS_DOCTOR: 5,               // same organisational level as district field coordinator
+  BAMS_DOCTOR: 5,
   BLOCK_DEVELOPMENT_COORDINATOR: 6,
   GRAM_DEVELOPMENT_COORDINATOR: 7,
-
-  // ── Sanstha Project Roles (7 core) ───────────────
   IT_DEVELOPER: 10,
   TEACHER: 10,
   NEWS_EDITOR: 10,
@@ -22,12 +19,8 @@ const roleLevelMap = {
   FINANCE_SERVICE_CONSULTANCY: 10,
   NGO_CONSULTANCY: 10,
   PROJECT_BASED_INTEGRATED_ROLE: 10,
-
-  // ── Vendor / Marketplace ─────────────────────────
   VENDOR: 11,
   AGENT: 11,
-
-  // ── User (beneficiary) ──────────────────────────
   USER: 12,
 };
 
@@ -58,8 +51,6 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: [
         'SUPER_ADMIN',
-
-        // ── NGO Organizational ──
         'ADDITIONAL_DIRECTOR',
         'STATE_DEVELOPMENT_COORDINATOR',
         'DISTRICT_BRANCH_MANAGER',
@@ -68,8 +59,6 @@ const userSchema = new mongoose.Schema(
         'BAMS_DOCTOR',
         'BLOCK_DEVELOPMENT_COORDINATOR',
         'GRAM_DEVELOPMENT_COORDINATOR',
-
-        // ── Sanstha Project ──
         'IT_DEVELOPER',
         'TEACHER',
         'NEWS_EDITOR',
@@ -77,12 +66,8 @@ const userSchema = new mongoose.Schema(
         'FINANCE_SERVICE_CONSULTANCY',
         'NGO_CONSULTANCY',
         'PROJECT_BASED_INTEGRATED_ROLE',
-
-        // ── Vendor / Marketplace ──
         'VENDOR',
         'AGENT',
-
-        // ── User ──
         'USER',
       ],
       default: 'USER',
@@ -93,12 +78,11 @@ const userSchema = new mongoose.Schema(
       default: [],
     },
 
-    // ========== HIERARCHY & MLM ==========
+    // ========== HIERARCHY & NETWORK ==========
     reportsTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     hierarchyLevel: { type: Number, default: 0, min: 0 },
     sponsorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     referralCode: { type: String, unique: true, sparse: true },
-    mlmLevel: { type: Number, default: 0 },
     leftChild: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     rightChild: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     teamSize: { type: Number, default: 0 },
@@ -240,6 +224,7 @@ const userSchema = new mongoose.Schema(
     // ========== FINANCE MODULE ==========
     walletBalance: { type: Number, default: 0, min: 0 },
     totalEarnings: { type: Number, default: 0 },
+    totalIncentiveEarned: { type: Number, default: 0 },          // renamed
     bankAccount: {
       accountNumber: { type: String, trim: true },
       ifsc: { type: String, trim: true },
@@ -260,9 +245,30 @@ const userSchema = new mongoose.Schema(
     ],
     billPayments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'BillPayment' }],
 
-    // ========== MLM / COMMISSION ==========
-    commissionRate: { type: Number, default: 0, min: 0, max: 100 },
-    totalCommissionEarned: { type: Number, default: 0 },
+    // ========== MODULE EARNINGS ==========
+    moduleEarnings: {
+      education: { type: Number, default: 0 },
+      agriculture: { type: Number, default: 0 },
+      healthcare: { type: Number, default: 0 },
+      finance: { type: Number, default: 0 },
+      license: { type: Number, default: 0 },
+      donation: { type: Number, default: 0 },
+      other: { type: Number, default: 0 },
+    },
+
+    // ========== INCENTIVE PAYOUT INFO ==========
+    incentivePayoutInfo: {
+      lastPayoutDate: Date,
+      nextPayoutDate: Date,
+      pendingIncentive: { type: Number, default: 0, min: 0 },
+      totalWithdrawn: { type: Number, default: 0, min: 0 },
+    },
+
+    // ========== PAYMENT INFO ==========
+    paymentInfo: {
+      razorpayCustomerId: String,
+      upiId: String,
+    },
 
     // ========== LICENSE SALES TRACKING ==========
     licenseStats: {
@@ -290,26 +296,6 @@ const userSchema = new mongoose.Schema(
       liveStreamingKey: String,
     },
     mediaPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MediaPost' }],
-
-    // ========== ADS & MONETIZATION ==========
-    adsSeen: [
-      {
-        campaignId: { type: mongoose.Schema.Types.ObjectId, ref: 'AdCampaign' },
-        seenAt: { type: Date, default: Date.now },
-        clicked: { type: Boolean, default: false },
-        clickedAt: Date,
-      }
-    ],
-    adPreferences: {
-      interestedCategories: [String],
-      optOutOfPersonalizedAds: { type: Boolean, default: false },
-      maxAdsPerDay: { type: Number, default: 10 },
-    },
-    adBlockedCreators: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-
-    // ========== CRM & IT MODULE ==========
-    clients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Client' }],
-    projects: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Project' }],
 
     // ========== E‑COMMERCE / VILLAGE STORE ==========
     sellerProfile: {
@@ -349,14 +335,6 @@ const userSchema = new mongoose.Schema(
       aiTokensRemaining: { type: Number, default: 10 },
     },
 
-    // ========== MLM PAYOUT INFO ==========
-    mlmPayoutInfo: {
-      lastPayoutDate: Date,
-      nextPayoutDate: Date,
-      pendingCommission: { type: Number, default: 0, min: 0 },
-      totalWithdrawn: { type: Number, default: 0, min: 0 },
-    },
-
     // ========== SECURITY & AUDIT ==========
     twoFactorEnabled: { type: Boolean, default: false },
     isDeleted: { type: Boolean, default: false },
@@ -375,7 +353,6 @@ const userSchema = new mongoose.Schema(
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
-
   { timestamps: true }
 );
 
@@ -396,9 +373,6 @@ userSchema.index({ lastLogin: -1 });
 userSchema.index({ 'mediaCreatorProfile.isCreator': 1 });
 userSchema.index({ 'sellerProfile.isSeller': 1 });
 userSchema.index({ isDeleted: 1 });
-userSchema.index({ 'adPreferences.optOutOfPersonalizedAds': 1 });
-userSchema.index({ adsSeen: 1 });
-userSchema.index({ adBlockedCreators: 1 });
 userSchema.index({ 'doctorVerification.verificationStatus': 1 });
 userSchema.index({ 'licenseStats.totalLicensesSold': 1 });
 userSchema.index({ contractStatus: 1 });

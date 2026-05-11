@@ -30,6 +30,20 @@ const VALID_ROLES = [
   'USER',
 ];
 
+// 🆕 Roles that MUST provide a sponsor referral code
+const ROLES_REQUIRING_SPONSOR = [
+  'ADDITIONAL_DIRECTOR',
+  'STATE_DEVELOPMENT_COORDINATOR',
+  'DISTRICT_BRANCH_MANAGER',
+  'DISTRICT_PRESIDENT',
+  'DISTRICT_FIELD_COORDINATOR',
+  'BAMS_DOCTOR',
+  'BLOCK_DEVELOPMENT_COORDINATOR',
+  'GRAM_DEVELOPMENT_COORDINATOR',
+  'VENDOR',
+  'AGENT',
+];
+
 const uploadDir = path.join(__dirname, '../uploads');
 (async () => {
   try {
@@ -66,7 +80,7 @@ exports.register = async (req, res) => {
       fatherName, motherName, dob, dateOfBirth, gender,
       aadhaarNumber, aadharCard, panNumber, panCard, voterId, passportNumber,
       state, district, block, village, pincode, fullAddress,
-      reportsTo, sponsorId, sponsorReferral,   // 🆕 sponsorReferral added
+      reportsTo, sponsorId, sponsorReferral,
       // TEACHER
       specialization, qualifications, experienceYears,
       // DOCTOR / BAMS
@@ -74,7 +88,7 @@ exports.register = async (req, res) => {
       // DOCTOR VERIFICATION
       qualification, college, yearOfPassing, medicalCouncilRegNumber,
       // FARMER
-      isContractFarmer, farmLocation, irrigationType,
+      landSize, crops, farmingType, isContractFarmer, farmLocation, irrigationType,
       // STUDENT
       className, schoolName, board, percentage,
       // IT
@@ -87,6 +101,8 @@ exports.register = async (req, res) => {
       isMediaCreator,
       // SELLER
       isSeller, storeName, gstNumber,
+      // PAYMENT
+      upiId,
       // QA
       developedBy, testedBy, qaStatus
     } = req.body;
@@ -109,7 +125,6 @@ exports.register = async (req, res) => {
 
     // ── 🔍 SPONSOR RESOLUTION ──
     let resolvedSponsor = null;
-    // Priority: direct sponsorId (ObjectId) or sponsorReferral (code)
     if (sponsorId) {
       resolvedSponsor = await User.findById(sponsorId);
       if (!resolvedSponsor) {
@@ -121,22 +136,33 @@ exports.register = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Invalid sponsor referral code' });
       }
     }
-    // If no sponsor at all, leave as null
+
+    // 🆕 Check if the selected role requires a sponsor
+    let mappedRole = (role || 'USER').toUpperCase();
+    if (!VALID_ROLES.includes(mappedRole)) mappedRole = 'USER';
+
+    if (ROLES_REQUIRING_SPONSOR.includes(mappedRole) && !resolvedSponsor) {
+      return res.status(400).json({
+        success: false,
+        message: `रोल ${mappedRole} के लिए स्पॉन्सर रेफ़रल कोड अनिवार्य है। कृपया एक वैध रेफ़रल कोड प्रदान करें।`
+      });
+    }
+
+    // 🆕 Prevent self-referral
+    if (resolvedSponsor && resolvedSponsor.email === finalEmail) {
+      return res.status(400).json({ success: false, message: 'आप स्वयं अपने स्पॉन्सर नहीं बन सकते' });
+    }
 
     const otp = generateOTP();
     const hashedOtp = await hashOTP(otp);
-
-    let mappedRole = (role || 'USER').toUpperCase();
-    if (!VALID_ROLES.includes(mappedRole)) mappedRole = 'USER';
 
     let userModules = [];
     if (modules) {
       userModules = Array.isArray(modules) ? modules : [modules];
     } else {
-      // Auto-detect modules based on provided data
       if (finalAadhaar || finalPan || voterId || passportNumber) userModules.push('FINANCE');
       if (doctorSpecialization || registrationNumber || qualification || college) userModules.push('HEALTHCARE');
-      if (farmLocation || irrigationType) userModules.push('AGRICULTURE');
+      if (landSize || crops || farmLocation || irrigationType) userModules.push('AGRICULTURE');
       if (className || schoolName || board || percentage) userModules.push('EDUCATION');
       if (projectType || techStack || experience) userModules.push('IT');
       if (username || bio || interests) userModules.push('SOCIAL');
@@ -161,11 +187,12 @@ exports.register = async (req, res) => {
       otp: hashedOtp,
       otpExpire: Date.now() + 5 * 60 * 1000,
       reportsTo: reportsTo || null,
-      sponsorId: resolvedSponsor ? resolvedSponsor._id : null,   // 🆕 set from found sponsor
+      sponsorId: resolvedSponsor ? resolvedSponsor._id : null,
       createdBy: req.user ? req.user.id : null,
       updatedBy: req.user ? req.user.id : null,
       aiUsage: { diseaseDetectionCount: 0, aiTokensRemaining: 10 },
-      mlmPayoutInfo: { pendingCommission: 0, totalWithdrawn: 0 },
+      incentivePayoutInfo: { pendingIncentive: 0, totalWithdrawn: 0 },
+      paymentInfo: {},
       twoFactorEnabled: false,
       isDeleted: false,
       developedBy: developedBy || null,
@@ -174,6 +201,8 @@ exports.register = async (req, res) => {
       licenseStats: { totalLicensesSold: 0, monthlyLicensesSold: 0, lastMonthReset: new Date(), salaryEligible: false },
       contractStatus: 'draft',
     };
+
+    if (upiId) userData.paymentInfo.upiId = upiId;
 
     // Teacher profile
     if (mappedRole === 'TEACHER' || userModules.includes('EDUCATION')) {
@@ -185,7 +214,7 @@ exports.register = async (req, res) => {
       };
     }
 
-    // Doctor profile (BAMS_DOCTOR भी डॉक्टर है)
+    // Doctor profile
     if (mappedRole === 'BAMS_DOCTOR' || userModules.includes('HEALTHCARE')) {
       userData.doctorProfile = {
         specialization: doctorSpecialization || '',
@@ -205,13 +234,16 @@ exports.register = async (req, res) => {
     // Farmer profile
     if (userModules.includes('AGRICULTURE')) {
       userData.farmerProfile = {
+        landSize: landSize ? parseInt(landSize) : 0,
+        crops: parseArray(crops),
+        farmingType: farmingType || 'conventional',
         isContractFarmer: isContractFarmer === 'true' || isContractFarmer === true,
         farmLocation: farmLocation || '',
         irrigationType: irrigationType || '',
       };
     }
 
-    // Education profile (for students)
+    // Education profile
     if (userModules.includes('EDUCATION')) {
       userData.educationProfile = { className: className || '', schoolName: schoolName || '', board: board || '', percentage: percentage || '' };
     }
@@ -226,7 +258,7 @@ exports.register = async (req, res) => {
       userData.socialProfile = { username: username || '', bio: bio || '', interests: interests || '', followersCount: 0, followingCount: 0 };
     }
 
-    // Media creator profile
+    // Media creator
     if (userModules.includes('MEDIA') || isMediaCreator === 'true' || isMediaCreator === true) {
       userData.mediaCreatorProfile = { isCreator: true, creatorStatus: 'pending', totalPosts: 0, totalFollowers: 0, monetizationEarnings: 0, liveStreamingKey: Math.random().toString(36).substring(2, 15) };
     }
@@ -282,10 +314,9 @@ exports.register = async (req, res) => {
       }
     }
 
-    // ── 🆕 UPDATE SPONSOR'S TEAM & BINARY PLACEMENT ──
+    // Update sponsor's team & binary placement
     if (resolvedSponsor) {
       resolvedSponsor.teamSize = (resolvedSponsor.teamSize || 0) + 1;
-      // Optional: binary placement (left -> right)
       if (!resolvedSponsor.leftChild) {
         resolvedSponsor.leftChild = user._id;
       } else if (!resolvedSponsor.rightChild) {
@@ -488,7 +519,7 @@ exports.getProfile = async (req, res) => {
 };
 
 // ======================
-// UPDATE PROFILE (with new fields)
+// UPDATE PROFILE
 // ======================
 exports.updateProfile = async (req, res) => {
   try {
@@ -522,6 +553,12 @@ exports.updateProfile = async (req, res) => {
     ];
     for (const key of simpleFields) {
       if (req.body[key] !== undefined) user[key] = req.body[key];
+    }
+
+    // UPI ID
+    if (req.body.upiId !== undefined) {
+      user.paymentInfo = user.paymentInfo || {};
+      user.paymentInfo.upiId = req.body.upiId;
     }
 
     // Teacher profile
@@ -561,8 +598,11 @@ exports.updateProfile = async (req, res) => {
     }
 
     // Farmer profile
-    if (req.body.isContractFarmer !== undefined || req.body.farmLocation !== undefined || req.body.irrigationType !== undefined) {
+    if (req.body.landSize !== undefined || req.body.crops !== undefined || req.body.farmingType !== undefined || req.body.isContractFarmer !== undefined || req.body.farmLocation !== undefined || req.body.irrigationType !== undefined) {
       user.farmerProfile = user.farmerProfile || {};
+      if (req.body.landSize !== undefined) user.farmerProfile.landSize = parseInt(req.body.landSize);
+      if (req.body.crops !== undefined) user.farmerProfile.crops = parseArray(req.body.crops);
+      if (req.body.farmingType !== undefined) user.farmerProfile.farmingType = req.body.farmingType;
       if (req.body.isContractFarmer !== undefined) user.farmerProfile.isContractFarmer = req.body.isContractFarmer === 'true' || req.body.isContractFarmer === true;
       if (req.body.farmLocation !== undefined) user.farmerProfile.farmLocation = req.body.farmLocation;
       if (req.body.irrigationType !== undefined) user.farmerProfile.irrigationType = req.body.irrigationType;
@@ -597,10 +637,7 @@ exports.updateProfile = async (req, res) => {
     if (req.body.isMediaCreator !== undefined) {
       const isCreator = req.body.isMediaCreator === 'true' || req.body.isMediaCreator === true;
       if (isCreator && !user.mediaCreatorProfile) {
-        user.mediaCreatorProfile = {
-          isCreator: true, creatorStatus: 'pending', totalPosts: 0, totalFollowers: 0,
-          monetizationEarnings: 0, liveStreamingKey: Math.random().toString(36).substring(2, 15),
-        };
+        user.mediaCreatorProfile = { isCreator: true, creatorStatus: 'pending', totalPosts: 0, totalFollowers: 0, monetizationEarnings: 0, liveStreamingKey: Math.random().toString(36).substring(2, 15) };
       } else if (!isCreator && user.mediaCreatorProfile) {
         user.mediaCreatorProfile = null;
       }
@@ -610,10 +647,7 @@ exports.updateProfile = async (req, res) => {
     if (req.body.isSeller !== undefined) {
       const isSeller = req.body.isSeller === 'true' || req.body.isSeller === true;
       if (isSeller && !user.sellerProfile) {
-        user.sellerProfile = {
-          isSeller: true, storeName: req.body.storeName || `${user.fullName}'s Store`,
-          gstNumber: req.body.gstNumber || '', rating: 0,
-        };
+        user.sellerProfile = { isSeller: true, storeName: req.body.storeName || `${user.fullName}'s Store`, gstNumber: req.body.gstNumber || '', rating: 0 };
       } else if (!isSeller && user.sellerProfile) {
         user.sellerProfile = null;
       } else if (user.sellerProfile) {
@@ -636,12 +670,6 @@ exports.updateProfile = async (req, res) => {
     if (req.body.developedBy !== undefined) user.developedBy = req.body.developedBy;
     if (req.body.testedBy !== undefined) user.testedBy = req.body.testedBy;
     if (req.body.qaStatus !== undefined) user.qaStatus = req.body.qaStatus;
-
-    // AI tokens (admin only)
-    if (req.body.aiTokensRemaining !== undefined && req.user.role === 'SUPER_ADMIN') {
-      user.aiUsage = user.aiUsage || {};
-      user.aiUsage.aiTokensRemaining = parseInt(req.body.aiTokensRemaining);
-    }
 
     user.updatedBy = req.user.id;
     await user.save();
@@ -685,11 +713,10 @@ exports.assignReporting = async (req, res) => {
       const sponsor = await User.findById(sponsorId);
       if (!sponsor) return res.status(404).json({ success: false, message: 'Sponsor not found' });
       user.sponsorId = sponsorId;
-      user.mlmLevel = (sponsor.mlmLevel || 0) + 1;
     }
     user.updatedBy = req.user.id;
     await user.save();
-    res.json({ success: true, message: 'Hierarchy updated', user: { _id: user._id, reportsTo: user.reportsTo, sponsorId: user.sponsorId } });
+    res.json({ success: true, message: 'Hierarchy updated' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -701,11 +728,9 @@ exports.assignReporting = async (req, res) => {
 exports.getSubordinates = async (req, res) => {
   try {
     const userId = req.params.id || req.user.id;
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    const subordinates = await User.find({ reportsTo: userId }).select('fullName email role');
-    const mlmDownlines = await User.find({ sponsorId: userId }).select('fullName email role mlmLevel');
-    res.json({ success: true, officialSubordinates: subordinates, mlmDownlines: mlmDownlines });
+    const subordinates = await User.find({ reportsTo: userId, isDeleted: false }).select('fullName email role');
+    const networkDownlines = await User.find({ sponsorId: userId, isDeleted: false }).select('fullName email role teamSize');
+    res.json({ success: true, officialSubordinates: subordinates, networkDownlines });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -721,12 +746,7 @@ exports.getAllUsers = async (req, res) => {
     if (role) filter.role = role;
     if (isVerified !== undefined) filter.isVerified = isVerified === 'true';
     if (includeDeleted !== 'true') filter.isDeleted = false;
-
-    const users = await User.find(filter)
-      .select('-password -otp -otpExpire')
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .sort({ createdAt: -1 });
+    const users = await User.find(filter).select('-password -otp -otpExpire').limit(limit * 1).skip((page - 1) * limit).sort({ createdAt: -1 });
     const total = await User.countDocuments(filter);
     res.json({ success: true, users, totalPages: Math.ceil(total / limit), currentPage: page, total });
   } catch (error) {
@@ -739,10 +759,7 @@ exports.getAllUsers = async (req, res) => {
 // ======================
 exports.getUserById = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id)
-      .select('-password -otp -otpExpire')
-      .populate('reportsTo', 'fullName email role')
-      .populate('sponsorId', 'fullName email');
+    const user = await User.findById(req.params.id).select('-password -otp -otpExpire').populate('reportsTo sponsorId', 'fullName email role');
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     res.json({ success: true, user });
   } catch (error) {
@@ -758,18 +775,12 @@ exports.deleteUser = async (req, res) => {
     const { hardDelete } = req.query;
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
     if (hardDelete === 'true') {
-      if (user.profileImage) {
-        const filePath = path.join(__dirname, '../', user.profileImage);
-        await fs.unlink(filePath).catch(() => {});
-      }
+      if (user.profileImage) { const fp = path.join(__dirname, '../', user.profileImage); await fs.unlink(fp).catch(() => {}); }
       await User.findByIdAndDelete(req.params.id);
       res.json({ success: true, message: 'User permanently deleted' });
     } else {
-      user.isDeleted = true;
-      user.deletedAt = new Date();
-      user.isActive = false;
+      user.isDeleted = true; user.deletedAt = new Date(); user.isActive = false;
       await user.save();
       res.json({ success: true, message: 'User deactivated (soft delete)' });
     }
@@ -785,11 +796,9 @@ exports.restoreUser = async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    user.isDeleted = false;
-    user.deletedAt = null;
-    user.isActive = true;
+    user.isDeleted = false; user.deletedAt = null; user.isActive = true;
     await user.save();
-    res.json({ success: true, message: 'User restored successfully' });
+    res.json({ success: true, message: 'User restored' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -806,7 +815,7 @@ exports.updateAITokens = async (req, res) => {
     user.aiUsage = user.aiUsage || {};
     user.aiUsage.aiTokensRemaining = parseInt(tokens);
     await user.save();
-    res.json({ success: true, message: 'AI tokens updated', aiTokens: user.aiUsage.aiTokensRemaining });
+    res.json({ success: true, message: 'AI tokens updated' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -821,13 +830,9 @@ exports.incrementAIUsage = async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     user.aiUsage = user.aiUsage || {};
-    if (type === 'disease') {
-      user.aiUsage.diseaseDetectionCount = (user.aiUsage.diseaseDetectionCount || 0) + 1;
-    }
+    if (type === 'disease') user.aiUsage.diseaseDetectionCount = (user.aiUsage.diseaseDetectionCount || 0) + 1;
     user.aiUsage.lastDetectionAt = new Date();
-    if (user.aiUsage.aiTokensRemaining > 0) {
-      user.aiUsage.aiTokensRemaining -= 1;
-    }
+    if (user.aiUsage.aiTokensRemaining > 0) user.aiUsage.aiTokensRemaining -= 1;
     await user.save();
     res.json({ success: true, aiUsage: user.aiUsage });
   } catch (error) {
@@ -843,18 +848,8 @@ exports.addSubscriptionHistory = async (req, res) => {
     const { userId, plan, startDate, endDate, amountPaid, transactionId } = req.body;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    user.subscriptionHistory.push({
-      plan,
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
-      amountPaid,
-      transactionId,
-    });
-    user.activeSubscription = {
-      plan,
-      expiresAt: new Date(endDate),
-      autoRenew: user.activeSubscription?.autoRenew || false,
-    };
+    user.subscriptionHistory.push({ plan, startDate: new Date(startDate), endDate: new Date(endDate), amountPaid, transactionId });
+    user.activeSubscription = { plan, expiresAt: new Date(endDate), autoRenew: user.activeSubscription?.autoRenew || false };
     await user.save();
     res.json({ success: true, message: 'Subscription history added' });
   } catch (error) {
@@ -863,20 +858,20 @@ exports.addSubscriptionHistory = async (req, res) => {
 };
 
 // ======================
-// UPDATE MLM PAYOUT INFO
+// UPDATE INCENTIVE PAYOUT
 // ======================
-exports.updateMLMPayout = async (req, res) => {
+exports.updateIncentivePayout = async (req, res) => {
   try {
-    const { userId, pendingCommission, totalWithdrawn, lastPayoutDate, nextPayoutDate } = req.body;
+    const { userId, pendingIncentive, totalWithdrawn, lastPayoutDate, nextPayoutDate } = req.body;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    user.mlmPayoutInfo = user.mlmPayoutInfo || {};
-    if (pendingCommission !== undefined) user.mlmPayoutInfo.pendingCommission = pendingCommission;
-    if (totalWithdrawn !== undefined) user.mlmPayoutInfo.totalWithdrawn = totalWithdrawn;
-    if (lastPayoutDate) user.mlmPayoutInfo.lastPayoutDate = new Date(lastPayoutDate);
-    if (nextPayoutDate) user.mlmPayoutInfo.nextPayoutDate = new Date(nextPayoutDate);
+    user.incentivePayoutInfo = user.incentivePayoutInfo || {};
+    if (pendingIncentive !== undefined) user.incentivePayoutInfo.pendingIncentive = pendingIncentive;
+    if (totalWithdrawn !== undefined) user.incentivePayoutInfo.totalWithdrawn = totalWithdrawn;
+    if (lastPayoutDate) user.incentivePayoutInfo.lastPayoutDate = new Date(lastPayoutDate);
+    if (nextPayoutDate) user.incentivePayoutInfo.nextPayoutDate = new Date(nextPayoutDate);
     await user.save();
-    res.json({ success: true, mlmPayoutInfo: user.mlmPayoutInfo });
+    res.json({ success: true, incentivePayoutInfo: user.incentivePayoutInfo });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -888,24 +883,18 @@ exports.updateMLMPayout = async (req, res) => {
 exports.updateWallet = async (req, res) => {
   try {
     const { userId, amount, operation } = req.body;
-    if (!userId || amount === undefined || !operation) {
-      return res.status(400).json({ success: false, message: 'Missing required fields' });
-    }
+    if (!userId || amount === undefined || !operation) return res.status(400).json({ success: false, message: 'Missing required fields' });
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     if (operation === 'add') {
       user.walletBalance = (user.walletBalance || 0) + amount;
       user.totalEarnings = (user.totalEarnings || 0) + amount;
     } else if (operation === 'deduct') {
-      if ((user.walletBalance || 0) < amount) {
-        return res.status(400).json({ success: false, message: 'Insufficient wallet balance' });
-      }
+      if ((user.walletBalance || 0) < amount) return res.status(400).json({ success: false, message: 'Insufficient wallet balance' });
       user.walletBalance = (user.walletBalance || 0) - amount;
-    } else {
-      return res.status(400).json({ success: false, message: 'Invalid operation. Use "add" or "deduct"' });
-    }
+    } else return res.status(400).json({ success: false, message: 'Invalid operation' });
     await user.save();
-    res.json({ success: true, message: `Wallet ${operation}ed by ${amount}`, walletBalance: user.walletBalance });
+    res.json({ success: true, walletBalance: user.walletBalance });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -920,7 +909,6 @@ exports.addHealthRecord = async (req, res) => {
     const userId = req.params.userId || req.user.id;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
     let fileUrl = null;
     if (req.file) {
       const ext = path.extname(req.file.originalname);
@@ -929,14 +917,9 @@ exports.addHealthRecord = async (req, res) => {
       await fs.rename(req.file.path, newPath);
       fileUrl = `/uploads/${fileName}`;
     }
-
-    user.healthRecords.push({
-      recordType, title, description, fileUrl,
-      date: date ? new Date(date) : new Date(),
-      doctorId: req.user.id,
-    });
+    user.healthRecords.push({ recordType, title, description, fileUrl, date: date ? new Date(date) : new Date(), doctorId: req.user.id });
     await user.save();
-    res.json({ success: true, message: 'Health record added', healthRecords: user.healthRecords });
+    res.json({ success: true, message: 'Health record added' });
   } catch (error) {
     if (req.file) await fs.unlink(req.file.path).catch(() => {});
     res.status(500).json({ success: false, error: error.message });
@@ -952,7 +935,6 @@ exports.addProductListing = async (req, res) => {
     const userId = req.user.id;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
     let imageUrl = null;
     if (req.file) {
       const ext = path.extname(req.file.originalname);
@@ -961,14 +943,9 @@ exports.addProductListing = async (req, res) => {
       await fs.rename(req.file.path, newPath);
       imageUrl = `/uploads/${fileName}`;
     }
-
-    const newProduct = {
-      name, price: parseFloat(price), quantity: parseFloat(quantity), unit, category, description,
-      imageUrl, sellerId: userId, createdAt: new Date(),
-    };
-    user.productListings.push(newProduct);
+    user.productListings.push({ name, price: parseFloat(price), quantity: parseFloat(quantity), unit, category, description, imageUrl, sellerId: userId, createdAt: new Date() });
     await user.save();
-    res.json({ success: true, message: 'Product added', product: newProduct });
+    res.json({ success: true, message: 'Product added' });
   } catch (error) {
     if (req.file) await fs.unlink(req.file.path).catch(() => {});
     res.status(500).json({ success: false, error: error.message });
@@ -976,30 +953,18 @@ exports.addProductListing = async (req, res) => {
 };
 
 // ======================
-// ADD CONTRACT FARMING AGREEMENT
+// ADD CONTRACT FARMING
 // ======================
 exports.addContractFarming = async (req, res) => {
   try {
     const { buyerId, quantity, pricePerUnit, startDate, endDate } = req.body;
-    const farmerId = req.user.id;
-    const farmer = await User.findById(farmerId);
-    if (!farmer || !farmer.farmerProfile) {
-      return res.status(400).json({ success: false, message: 'User is not a farmer' });
-    }
+    const farmer = await User.findById(req.user.id);
+    if (!farmer || !farmer.farmerProfile) return res.status(400).json({ success: false, message: 'User is not a farmer' });
     const buyer = await User.findById(buyerId);
     if (!buyer) return res.status(404).json({ success: false, message: 'Buyer not found' });
-
-    const agreement = {
-      buyerId,
-      quantity: parseFloat(quantity),
-      pricePerUnit: parseFloat(pricePerUnit),
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
-      status: 'pending',
-    };
-    farmer.contractFarmingAgreements.push(agreement);
+    farmer.contractFarmingAgreements.push({ buyerId, quantity: parseFloat(quantity), pricePerUnit: parseFloat(pricePerUnit), startDate: new Date(startDate), endDate: new Date(endDate), status: 'pending' });
     await farmer.save();
-    res.json({ success: true, message: 'Contract farming request sent', agreement });
+    res.json({ success: true, message: 'Contract farming request sent' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -1014,26 +979,16 @@ exports.addLoan = async (req, res) => {
     const userId = req.params.userId || req.user.id;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-    const loan = {
-      amount: parseFloat(amount),
-      emiAmount: parseFloat(emiAmount),
-      tenureMonths: parseInt(tenureMonths),
-      outstanding: parseFloat(amount),
-      nextDueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      status: 'active',
-      sanctionedAt: new Date(),
-    };
-    user.loans.push(loan);
+    user.loans.push({ amount: parseFloat(amount), emiAmount: parseFloat(emiAmount), tenureMonths: parseInt(tenureMonths), outstanding: parseFloat(amount), nextDueDate: new Date(Date.now() + 30*24*60*60*1000), status: 'active', sanctionedAt: new Date() });
     await user.save();
-    res.json({ success: true, message: 'Loan added', loan });
+    res.json({ success: true, message: 'Loan added' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
 // ======================
-// ADD CLIENT (CRM)
+// ADD CLIENT
 // ======================
 exports.addClient = async (req, res) => {
   try {
@@ -1041,21 +996,16 @@ exports.addClient = async (req, res) => {
     const userId = req.user.id;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-    const client = {
-      name, email, phone, company, gstNumber, address,
-      createdBy: userId, createdAt: new Date(),
-    };
-    user.clients.push(client);
+    user.clients.push({ name, email, phone, company, gstNumber, address, createdBy: userId, createdAt: new Date() });
     await user.save();
-    res.json({ success: true, message: 'Client added', client });
+    res.json({ success: true, message: 'Client added' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
 // ======================
-// ADD PROJECT (CRM/IT)
+// ADD PROJECT
 // ======================
 exports.addProject = async (req, res) => {
   try {
@@ -1063,36 +1013,23 @@ exports.addProject = async (req, res) => {
     const userId = req.user.id;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-    const project = {
-      name, description, clientId,
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
-      budget: parseFloat(budget),
-      status: 'active',
-      createdBy: userId,
-      createdAt: new Date(),
-    };
-    user.projects.push(project);
+    user.projects.push({ name, description, clientId, startDate: new Date(startDate), endDate: new Date(endDate), budget: parseFloat(budget), status: 'active', createdBy: userId, createdAt: new Date() });
     await user.save();
-    res.json({ success: true, message: 'Project added', project });
+    res.json({ success: true, message: 'Project added' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
 // ======================
-// ADD STORE PRODUCT (E-commerce)
+// ADD STORE PRODUCT
 // ======================
 exports.addStoreProduct = async (req, res) => {
   try {
     const { name, price, category, stock, description } = req.body;
     const userId = req.user.id;
     const user = await User.findById(userId);
-    if (!user || !user.sellerProfile) {
-      return res.status(400).json({ success: false, message: 'User is not a seller' });
-    }
-
+    if (!user || !user.sellerProfile) return res.status(400).json({ success: false, message: 'User is not a seller' });
     let imageUrl = null;
     if (req.file) {
       const ext = path.extname(req.file.originalname);
@@ -1101,14 +1038,9 @@ exports.addStoreProduct = async (req, res) => {
       await fs.rename(req.file.path, newPath);
       imageUrl = `/uploads/${fileName}`;
     }
-
-    const product = {
-      name, price: parseFloat(price), category, stock: parseInt(stock), description,
-      imageUrl, sellerId: userId, createdAt: new Date(),
-    };
-    user.storeProducts.push(product);
+    user.storeProducts.push({ name, price: parseFloat(price), category, stock: parseInt(stock), description, imageUrl, sellerId: userId, createdAt: new Date() });
     await user.save();
-    res.json({ success: true, message: 'Store product added', product });
+    res.json({ success: true, message: 'Store product added' });
   } catch (error) {
     if (req.file) await fs.unlink(req.file.path).catch(() => {});
     res.status(500).json({ success: false, error: error.message });
