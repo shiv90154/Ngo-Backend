@@ -1,12 +1,10 @@
 const express = require('express');
 const router = express.Router();
 
-// ---------- Import Route Modules (fully built & production-ready) ----------
+// ---------- Import Route Modules ----------
 const userRoutes = require('./auth.routes');
 const healthcareRoutes = require('./healthcare.routes');
 const educationRoutes = require('./education.routes');
-
-// ---------- Other route imports (commented – not yet production-ready) ----------
 const medicineRoutes = require('./medicines.routes');
 const mediaRoutes = require('./media.routes');
 const notificationRoutes = require('./notification.routes');
@@ -26,6 +24,10 @@ const memberCertificateRoutes = require('./memberCertificate.routes');
 const eventRoutes = require('./event.routes');
 const expenseRoutes = require('./expense.routes');
 const serviceRequestRoutes = require('./serviceRequest.routes');
+const contributionRoutes = require('./contribution.routes');
+const newsRoutes = require('./news.routes');
+const internshipRoutes = require('./internship.routes');   // 🆕 Internship
+const productSaleRoutes = require('./productSale.routes'); // 🆕 Product Sale (Licenses + Education)
 const searchController = require('../controllers/search.controller');
 
 // ---------- Health Check ----------
@@ -33,14 +35,14 @@ router.get('/health', (req, res) => {
   res.json({ success: true, message: 'API is running' });
 });
 
-// ---------- Mount Active Routes ----------
+// ---------- Mount Routes ----------
 router.use('/users', userRoutes);
 router.use('/healthcare', healthcareRoutes);
 router.use('/education', educationRoutes);
-
-// ---------- Future routes (commented out) ----------
 router.use('/medicines', medicineRoutes);
 router.use('/media', mediaRoutes);
+router.use('/news', newsRoutes);
+router.use('/internships', internshipRoutes);            // 🆕 Internship endpoints
 router.use('/notifications', notificationRoutes);
 router.use('/admin', adminRoutes);
 router.use('/liveclass', liveClassRoutes);
@@ -58,7 +60,8 @@ router.use('/campaigns', campaignRoutes);
 router.use('/member-certificates', memberCertificateRoutes);
 router.use('/events', eventRoutes);
 router.use('/expenses', expenseRoutes);
-router.use('/contributions', require('./contribution.routes'));
+router.use('/contributions', contributionRoutes);
+router.use('/products', productSaleRoutes);               // 🆕 Product Sale (Licenses + Education Programs)
 router.get('/search', searchController.globalSearch);
 
 module.exports = router;

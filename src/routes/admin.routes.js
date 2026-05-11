@@ -3,24 +3,19 @@ const router = express.Router();
 const { protect, restrictTo } = require('../middleware');
 const adminController = require('../controllers/admin.controller');
 
-const adminRoles = [
-  'SUPER_ADMIN','ADDITIONAL_DIRECTOR','STATE_OFFICER',
-  'DISTRICT_MANAGER','DISTRICT_PRESIDENT','FIELD_OFFICER',
-  'BLOCK_OFFICER','VILLAGE_OFFICER'
+// Allowed admin roles (as per your User model)
+const ADMIN_ROLES = [
+  'SUPER_ADMIN',
+  'ADDITIONAL_DIRECTOR',
+  
 ];
 
-// ──────────────────────────────────────────────
-// 1️⃣ Public‑read routes (any authenticated user)
-//    Must be placed BEFORE the global restrictTo
-// ──────────────────────────────────────────────
+// ─── Public‑read (any authenticated user) ───
 router.get('/licenses/types', protect, adminController.getLicenseTypes);
 
-// ──────────────────────────────────────────────
-// 2️⃣ Global admin middleware – everything below
-//    is restricted to adminRoles
-// ──────────────────────────────────────────────
+// ─── Admin‑only routes ───
 router.use(protect);
-router.use(restrictTo(...adminRoles));
+router.use(restrictTo(...ADMIN_ROLES));
 
 // ---------- STATS ----------
 router.get('/stats', adminController.getStats);
@@ -52,11 +47,7 @@ router.get('/subordinates/:id', adminController.getSubordinates);
 // ---------- GLOBAL NOTIFICATIONS ----------
 router.post('/notifications/send', adminController.sendGlobalNotification);
 
-// ======================
-// 🆕 Admin‑only mutations (still behind the global restrictTo)
-// ======================
-
-// ---------- LICENSE TYPES (CUD) ----------
+// ---------- LICENSE TYPES ----------
 router.post('/licenses/types', adminController.createLicenseType);
 router.put('/licenses/types/:id', adminController.updateLicenseType);
 router.delete('/licenses/types/:id', adminController.deleteLicenseType);

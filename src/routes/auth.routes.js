@@ -1,4 +1,4 @@
-// src/routes/auth.routes.js
+// backend/src/routes/auth.routes.js
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 
 const userController = require('../controllers/auth.controller');
+const User = require('../models/user.model');  // 🆕 for verify-sponsor route
 const { protect, restrictTo, rateLimiter } = require('../middleware');
 const {
   registerValidation,
@@ -43,6 +44,13 @@ router.post(
   registerValidation,
   userController.register
 );
+
+// 🆕 Verify Sponsor Referral Code
+router.get('/verify-sponsor/:code', async (req, res) => {
+  const sponsor = await User.findOne({ referralCode: req.params.code }).select('fullName');
+  if (!sponsor) return res.status(404).json({ success: false, message: 'Invalid referral code' });
+  res.json({ success: true, fullName: sponsor.fullName });
+});
 
 router.post('/verify-otp', otpValidation, rateLimiter.otpLimiter, userController.verifyOTP);
 router.post('/resend-otp', otpValidation, rateLimiter.otpLimiter, userController.resendOTP);
@@ -163,5 +171,13 @@ router.post(
              'DISTRICT_BRANCH_MANAGER', 'DISTRICT_PRESIDENT'),
   userController.assignReporting
 );
+router.get('/search', protect, async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).json({ success: false, message: 'Email query required' });
+  const users = await User.find({ email: { $regex: email, $options: 'i' } })
+    .select('fullName email phone role')
+    .limit(5);
+  res.json({ success: true, users });
+});
 
 module.exports = router;
