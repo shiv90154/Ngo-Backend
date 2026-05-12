@@ -34,6 +34,7 @@ router.get('/certificates', protect, educationController.getMyCertificates);
 router.get('/batches/available', protect, batchController.getAvailableBatchesForStudent);
 router.get('/batches/filters', batchController.getBatchFilterOptions);
 router.get('/batches/my-batches', protect, batchController.getMyBatches);
+router.get('/batches/:batchId', batchController.getBatchDetails);
 router.post('/batches/:batchId/enroll', protect, batchController.enrollInBatch);
 // router.get('/batches/search', batchController.getBatchesByFilters);
 
@@ -58,6 +59,7 @@ router.post('/questions', ...instructorAuth, validate(eduVal.addQuestion), educa
 router.get('/instructor/batches', ...instructorAuth, batchController.getInstructorBatches);
 router.post('/instructor/batches', ...instructorAuth, validate(eduVal.createBatch), batchController.createBatch);
 router.put('/instructor/batches/:batchId', ...instructorAuth, validate(eduVal.updateBatch), batchController.updateBatch);
+router.get('/instructor/batches/:batchId', validate(eduVal.updateBatch), batchController.updateBatch);
 
 // Dashboard
 router.get('/instructor/dashboard', ...instructorAuth, educationController.getInstructorDashboard);

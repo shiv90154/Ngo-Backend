@@ -12,11 +12,22 @@ const { calculateCommission } = require('../services/mlmEngine');
 const mailer = require('../utils/sendEmail');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
+const path = require("path");
 
 // ====================== कोर्स CRUD (टीचर/एडमिन) ======================
 exports.createCourse = catchAsync(async (req, res, next) => {
-  const { title, description, price, category, language } = req.body;
-  const thumbnail = req.file?.filename ? `/uploads/courses/${req.file.filename}` : null;
+  const {
+    title,
+    description,
+    price,
+    category,
+    language,
+    isPublished,
+  } = req.body;
+
+  const thumbnail = req.file?.filename
+    ? path.join(__dirname, "../../Server/src/uploads/courses", req.file.filename)
+    : null;
 
   const course = await Course.create({
     title,
@@ -24,13 +35,16 @@ exports.createCourse = catchAsync(async (req, res, next) => {
     price,
     category,
     language,
+    isPublished: isPublished === "true" || isPublished === true,
     instructor: req.user.id,
-    thumbnail
+    thumbnail,
   });
 
-  res.status(201).json({ success: true, course });
+  res.status(201).json({
+    success: true,
+    course,
+  });
 });
-
 exports.getMyCourses = catchAsync(async (req, res, next) => {
   const courses = await Course.find({ instructor: req.user.id })
     .sort('-createdAt');
