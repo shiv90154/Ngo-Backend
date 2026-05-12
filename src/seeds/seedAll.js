@@ -8,7 +8,6 @@ const EducationProgram = require('../models/EducationProgram');
 const CommissionSplit = require('../models/CommissionSplit');
 
 
-
 async function seed() {
   try {
     await mongoose.connect(MONGO_URI);
