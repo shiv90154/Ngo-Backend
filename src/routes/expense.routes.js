@@ -1,36 +1,19 @@
-// backend/src/routes/expense.routes.js
 const express = require('express');
 const router = express.Router();
 const { protect, restrictTo } = require('../middleware');
 const scopeFilter = require('../middleware/scopeFilter');
-const Expense = require('../models/Expense');
-const asyncHandler = require('express-async-handler');
+const expenseController = require('../controllers/expense.controller');
+const { NGO_ORGANIZATIONAL_ROLES } = require('../config/roles');
 
-const NGO_ROLES = ['SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_DEVELOPMENT_COORDINATOR', 'DISTRICT_BRANCH_MANAGER', 'DISTRICT_PRESIDENT', 'DISTRICT_FIELD_COORDINATOR', 'BLOCK_DEVELOPMENT_COORDINATOR', 'GRAM_DEVELOPMENT_COORDINATOR'];
+const ALLOWED = ['SUPER_ADMIN', ...NGO_ORGANIZATIONAL_ROLES];
 
 router.use(protect);
-router.use(scopeFilter);
+router.use(scopeFilter);   // हर रिक्वेस्ट पर req.scopeFilter सेट करता है
 
-router.get('/', restrictTo(...NGO_ROLES), asyncHandler(async (req, res) => {
-  const filter = { ...req.scopeFilter };
-  const expenses = await Expense.find(filter).sort('-date').populate('createdBy', 'fullName');
-  res.json({ success: true, expenses });
-}));
-
-router.post('/', restrictTo(...NGO_ROLES), asyncHandler(async (req, res) => {
-  const { category, amount, description, date } = req.body;
-  const expense = await Expense.create({
-    category,
-    amount,
-    description,
-    date,
-    state: req.user.state,
-    district: req.user.district,
-    block: req.user.block,
-    village: req.user.village,
-    createdBy: req.user._id,
-  });
-  res.status(201).json({ success: true, expense });
-}));
+router.get('/', restrictTo(...ALLOWED), expenseController.getExpenses);
+router.post('/', restrictTo(...ALLOWED), expenseController.createExpense);
+router.put('/:id', restrictTo(...ALLOWED), expenseController.updateExpense);
+router.delete('/:id', restrictTo(...ALLOWED), expenseController.deleteExpense);
+router.get('/export/pdf', restrictTo(...ALLOWED), expenseController.exportExpensesPDF);
 
 module.exports = router;

@@ -1,46 +1,57 @@
-const MemberCertificate = require('../models/MemberCertificate'); // fields: memberName, certificateType, issuedDate, verificationCode
+const MemberCertificate = require('../models/MemberCertificate');
+const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/AppError');
 
-exports.generateCertificate = async (req, res) => {
-  try {
-    const { memberName, certificateType, customMessage } = req.body;
-    const verificationCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-    const certificate = await MemberCertificate.create({
-      memberName,
-      certificateType,
-      customMessage,
-      verificationCode,
-      issuedBy: req.user.id,
-    });
-    res.status(201).json({ success: true, certificate });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
+// @desc   Generate a new certificate
+// @route  POST /api/member-certificates/generate
+exports.generateCertificate = catchAsync(async (req, res, next) => {
+  const { memberName, certificateType, customMessage } = req.body;
 
-exports.getAllCertificates = async (req, res) => {
-  try {
-    const certificates = await MemberCertificate.find().sort({ issuedDate: -1 }).populate('issuedBy', 'fullName');
-    res.json({ success: true, certificates });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  if (!memberName || !certificateType) {
+    return next(new AppError('सदस्य का नाम और प्रमाणपत्र प्रकार आवश्यक है', 400));
   }
-};
 
-exports.getMyCertificates = async (req, res) => {
-  try {
-    const certificates = await MemberCertificate.find({ issuedBy: req.user.id }).sort({ issuedDate: -1 });
-    res.json({ success: true, certificates });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-};
+  // Generate a unique verification code
+  const verificationCode = Math.random().toString(36).substring(2, 10).toUpperCase();
 
-exports.verifyCertificate = async (req, res) => {
-  try {
-    const cert = await MemberCertificate.findOne({ verificationCode: req.params.code });
-    if (!cert) return res.status(404).json({ success: false, message: 'Invalid certificate' });
-    res.json({ success: true, certificate: cert });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  const certificate = await MemberCertificate.create({
+    memberName,
+    certificateType,
+    customMessage,
+    verificationCode,
+    issuedBy: req.user.id,
+    state: req.user.state,
+    district: req.user.district,
+    block: req.user.block,
+    village: req.user.village,
+  });
+
+  res.status(201).json({ success: true, certificate });
+});
+
+// @desc   Get all certificates (Admin/NGO)
+// @route  GET /api/member-certificates/all
+exports.getAllCertificates = catchAsync(async (req, res) => {
+  const certificates = await MemberCertificate.find()
+    .sort('-issuedDate')
+    .populate('issuedBy', 'fullName email');
+  res.json({ success: true, certificates });
+});
+
+// @desc   Get certificates issued by me
+// @route  GET /api/member-certificates/my
+exports.getMyCertificates = catchAsync(async (req, res) => {
+  const certificates = await MemberCertificate.find({ issuedBy: req.user.id })
+    .sort('-issuedDate');
+  res.json({ success: true, certificates });
+});
+
+// @desc   Verify a certificate by code
+// @route  GET /api/member-certificates/verify/:code
+exports.verifyCertificate = catchAsync(async (req, res, next) => {
+  const cert = await MemberCertificate.findOne({ verificationCode: req.params.code });
+  if (!cert) {
+    return next(new AppError('Invalid or expired verification code', 404));
   }
-};
+  res.json({ success: true, certificate: cert });
+});

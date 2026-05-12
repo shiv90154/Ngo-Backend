@@ -1,64 +1,94 @@
-const Event = require('../models/Event'); // fields: title, description, eventDate, location, maxParticipants, registeredCount, state
+const Event = require('../models/Event');
+const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/AppError');
 
-exports.getUpcomingEvents = async (req, res) => {
-  try {
-    const events = await Event.find({ eventDate: { $gte: new Date() }, ...req.scopeFilter }).sort({ eventDate: 1 });
-    res.json({ success: true, events });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+// @desc   Get upcoming events (future events) - scoped
+exports.getUpcomingEvents = catchAsync(async (req, res) => {
+  const events = await Event.find({
+    eventDate: { $gte: new Date() },
+    ...req.scopeFilter
+  }).sort({ eventDate: 1 });
+
+  res.json({ success: true, events });
+});
+
+// @desc   Get all events (scoped)
+exports.getAllEvents = catchAsync(async (req, res) => {
+  const events = await Event.find(req.scopeFilter).sort({ eventDate: 1 });
+  res.json({ success: true, events });
+});
+
+// @desc   Create a new event (Admin/NGO)
+exports.createEvent = catchAsync(async (req, res, next) => {
+  const eventData = { ...req.body, createdBy: req.user.id };
+
+  // Optional: ensure scope fields from the creator if not provided
+  if (!eventData.state) eventData.state = req.user.state;
+  if (!eventData.district) eventData.district = req.user.district;
+  if (!eventData.block) eventData.block = req.user.block;
+  if (!eventData.village) eventData.village = req.user.village;
+
+  const event = await Event.create(eventData);
+  res.status(201).json({ success: true, event });
+});
+
+// @desc   Update an event (Admin/NGO)
+exports.updateEvent = catchAsync(async (req, res, next) => {
+  const event = await Event.findByIdAndUpdate(
+    req.params.id,
+    req.body,
+    { new: true, runValidators: true }
+  );
+  if (!event) {
+    return next(new AppError('Event not found', 404));
   }
-};
+  res.json({ success: true, event });
+});
 
-exports.getAllEvents = async (req, res) => {
-  try {
-    const events = await Event.find(req.scopeFilter).sort({ eventDate: 1 });
-    res.json({ success: true, events });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+// @desc   Delete an event (Admin/NGO)
+exports.deleteEvent = catchAsync(async (req, res, next) => {
+  const event = await Event.findByIdAndDelete(req.params.id);
+  if (!event) {
+    return next(new AppError('Event not found', 404));
   }
-};
+  res.json({ success: true, message: 'Event deleted' });
+});
 
-exports.createEvent = async (req, res) => {
-  try {
-    const event = await Event.create({ ...req.body, createdBy: req.user.id });
-    res.status(201).json({ success: true, event });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+// @desc   Register current user for an event
+exports.registerForEvent = catchAsync(async (req, res, next) => {
+  const { eventId } = req.body;
+  if (!eventId) {
+    return next(new AppError('Event ID is required', 400));
   }
-};
 
-exports.updateEvent = async (req, res) => {
-  try {
-    const event = await Event.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!event) return res.status(404).json({ success: false, message: 'Event not found' });
-    res.json({ success: true, event });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  const event = await Event.findById(eventId);
+  if (!event) {
+    return next(new AppError('Event not found', 404));
   }
-};
 
-exports.deleteEvent = async (req, res) => {
-  try {
-    const event = await Event.findByIdAndDelete(req.params.id);
-    if (!event) return res.status(404).json({ success: false, message: 'Event not found' });
-    res.json({ success: true, message: 'Event deleted' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  // Check if already registered
+  if (event.participants.includes(req.user.id)) {
+    return next(new AppError('You are already registered for this event', 400));
   }
-};
 
-exports.registerForEvent = async (req, res) => {
-  try {
-    const event = await Event.findById(req.body.eventId);
-    if (!event) return res.status(404).json({ success: false, message: 'Event not found' });
-    // Add registration logic (e.g., add user to participants array)
-    res.json({ success: true, message: 'Registered successfully' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+  // Check max participants limit
+  if (event.maxParticipants && event.registeredCount >= event.maxParticipants) {
+    return next(new AppError('Event is already full', 400));
   }
-};
 
-exports.getEventRegistrations = async (req, res) => {
-  // Implement based on your registration model
-  res.json({ success: true, registrations: [] });
-};
+  // Register
+  event.participants.push(req.user.id);
+  event.registeredCount = event.participants.length; // update count
+  await event.save();
+
+  res.json({ success: true, message: 'Registered successfully' });
+});
+
+// @desc   Get registrations for an event (Admin/NGO)
+exports.getEventRegistrations = catchAsync(async (req, res, next) => {
+  const event = await Event.findById(req.params.eventId).populate('participants', 'fullName email');
+  if (!event) {
+    return next(new AppError('Event not found', 404));
+  }
+  res.json({ success: true, registrations: event.participants });
+});

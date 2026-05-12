@@ -13,7 +13,7 @@ const {
   loginValidation,
   otpValidation,
   resetPasswordValidation,
-} = require('../validators/authValidator');
+} = require('../validators/authValidator');   // ✅ validation arrays
 
 // Multer setup
 const storage = multer.diskStorage({
@@ -41,7 +41,7 @@ router.post(
     { name: 'panDocument', maxCount: 1 },
     { name: 'storeLogo', maxCount: 1 },
   ]),
-  registerValidation,
+  ...registerValidation,          // ✅ स्प्रेड ज़रूरी है
   userController.register
 );
 
@@ -52,12 +52,12 @@ router.get('/verify-sponsor/:code', async (req, res) => {
   res.json({ success: true, fullName: sponsor.fullName });
 });
 
-router.post('/verify-otp', otpValidation, rateLimiter.otpLimiter, userController.verifyOTP);
-router.post('/resend-otp', otpValidation, rateLimiter.otpLimiter, userController.resendOTP);
-router.post('/login', loginValidation, rateLimiter.loginLimiter, userController.login);
+router.post('/verify-otp', ...otpValidation, rateLimiter.otpLimiter, userController.verifyOTP);
+router.post('/resend-otp', ...otpValidation, rateLimiter.otpLimiter, userController.resendOTP);
+router.post('/login', ...loginValidation, rateLimiter.loginLimiter, userController.login);
 router.post('/forgot-password', userController.forgotPassword);
-router.post('/verify-reset-otp', otpValidation, userController.verifyResetOtp);
-router.post('/reset-password', resetPasswordValidation, userController.resetPassword);
+router.post('/verify-reset-otp', ...otpValidation, userController.verifyResetOtp);
+router.post('/reset-password', ...resetPasswordValidation, userController.resetPassword);
 
 // ====================== PROTECTED ROUTES ======================
 // Profile

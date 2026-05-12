@@ -1,10 +1,10 @@
-// backend/src/controllers/productSale.controller.js
 const LicenseType = require('../models/LicenseType');
 const EducationProgram = require('../models/EducationProgram');
 const ProductSale = require('../models/ProductSale');
 const User = require('../models/user.model');
 const { calculateCommission } = require('../services/mlmEngine');
-const asyncHandler = require('express-async-handler');
+const catchAsync = require('../utils/catchAsync');        // ✅ अपना हेल्पर
+const AppError = require('../utils/AppError');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 
@@ -14,9 +14,10 @@ const razorpay = new Razorpay({
 });
 
 // @desc   Get all sellable products (licenses + education programs)
-exports.getSellableProducts = asyncHandler(async (req, res) => {
+// @route  GET /api/products/sellable
+exports.getSellableProducts = catchAsync(async (req, res) => {
   const licenses = await LicenseType.find({ isActive: true });
-  const eduPrograms = await EducationProgram.find();
+  const eduPrograms = await EducationProgram.find({ isActive: true });
 
   res.json({
     success: true,
@@ -33,12 +34,13 @@ exports.getSellableProducts = asyncHandler(async (req, res) => {
   });
 });
 
-// @desc   Sell a license or education program (supports online & offline)
-exports.sellProduct = asyncHandler(async (req, res) => {
+// @desc   Sell a license or education program (offline + online order creation)
+// @route  POST /api/products/sell
+exports.sellProduct = catchAsync(async (req, res, next) => {
   const { productType, productId, customerName, customerPhone, customerId, paymentMode } = req.body;
 
   if (!productType || !productId || !customerName) {
-    return res.status(400).json({ success: false, message: 'सभी फ़ील्ड भरें' });
+    return next(new AppError('सभी ज़रूरी फ़ील्ड भरें', 400));
   }
 
   let amount;
@@ -50,18 +52,19 @@ exports.sellProduct = asyncHandler(async (req, res) => {
     customer: customerId || null,
   };
 
+  // Determine product details and amount
   if (productType === 'license') {
     const license = await LicenseType.findById(productId);
-    if (!license) return res.status(404).json({ success: false, message: 'लाइसेंस नहीं मिला' });
+    if (!license) return next(new AppError('लाइसेंस नहीं मिला', 404));
     amount = license.membershipFee;
     saleData.licenseType = license._id;
   } else if (productType === 'education') {
     const program = await EducationProgram.findById(productId);
-    if (!program) return res.status(404).json({ success: false, message: 'एजुकेशन प्रोग्राम नहीं मिला' });
+    if (!program) return next(new AppError('एजुकेशन प्रोग्राम नहीं मिला', 404));
     amount = program.fee;
     saleData.educationProgram = program._id;
   } else {
-    return res.status(400).json({ success: false, message: 'अमान्य प्रोडक्ट टाइप' });
+    return next(new AppError('अमान्य प्रोडक्ट टाइप', 400));
   }
 
   // 🆕 Online payment – create Razorpay order, DO NOT save sale yet
@@ -89,24 +92,35 @@ exports.sellProduct = asyncHandler(async (req, res) => {
     });
   }
 
-  // Offline / cash sale – original flow
+  // Offline / cash sale – complete immediately
   saleData.amount = amount;
+  saleData.transactionId = 'OFFLINE_' + Date.now();   // ऑफ़लाइन रेफ़रेंस
   const sale = await ProductSale.create(saleData);
 
-  await User.findByIdAndUpdate(req.user._id, {
-    $inc: {
-      'licenseStats.totalLicensesSold': 1,
-      'licenseStats.monthlyLicensesSold': 1,
-    }
-  });
+  // ✅ विक्रेता के आँकड़े अपडेट (सिर्फ़ लाइसेंस होने पर)
+  if (productType === 'license') {
+    await User.findByIdAndUpdate(req.user._id, {
+      $inc: {
+        'licenseStats.totalLicensesSold': 1,
+        'licenseStats.monthlyLicensesSold': 1,
+      }
+    });
+  }
+  // अगर एजुकेशन की बिक्री के लिए अलग आँकड़े रखना चाहो तो भविष्य में जोड़ना।
 
-  await calculateCommission(req.user._id, amount, productType === 'license' ? 'license_sale' : 'education_sale', sale._id);
+  // कमीशन बाँटो
+  const commissionType = productType === 'license' ? 'license_sale' : 'education_sale';
+  await calculateCommission(req.user._id, amount, commissionType, sale._id);
+
+  sale.commissionDistributed = true;
+  await sale.save();
 
   res.status(201).json({ success: true, data: sale });
 });
 
 // @desc   Verify Razorpay payment & complete the sale (online flow)
-exports.verifySalePayment = asyncHandler(async (req, res) => {
+// @route  POST /api/products/verify-sale
+exports.verifySalePayment = catchAsync(async (req, res, next) => {
   const {
     razorpay_order_id,
     razorpay_payment_id,
@@ -125,7 +139,7 @@ exports.verifySalePayment = asyncHandler(async (req, res) => {
     .digest('hex');
 
   if (generated !== razorpay_signature) {
-    return res.status(400).json({ success: false, message: 'Invalid payment signature' });
+    return next(new AppError('Invalid payment signature', 400));
   }
 
   let amount;
@@ -135,63 +149,72 @@ exports.verifySalePayment = asyncHandler(async (req, res) => {
     customerPhone: customerPhone || '',
     soldBy: req.user._id,
     customer: customerId || null,
-    transactionId: razorpay_payment_id,   // Optional: add this field to ProductSale model
+    transactionId: razorpay_payment_id,   // रेज़रपे पेमेंट ID
   };
 
   if (productType === 'license') {
     const license = await LicenseType.findById(productId);
-    if (!license) return res.status(404).json({ success: false, message: 'लाइसेंस नहीं मिला' });
+    if (!license) return next(new AppError('लाइसेंस नहीं मिला', 404));
     amount = license.membershipFee;
     saleData.licenseType = license._id;
   } else if (productType === 'education') {
     const program = await EducationProgram.findById(productId);
-    if (!program) return res.status(404).json({ success: false, message: 'एजुकेशन प्रोग्राम नहीं मिला' });
+    if (!program) return next(new AppError('एजुकेशन प्रोग्राम नहीं मिला', 404));
     amount = program.fee;
     saleData.educationProgram = program._id;
   } else {
-    return res.status(400).json({ success: false, message: 'अमान्य प्रोडक्ट टाइप' });
+    return next(new AppError('अमान्य प्रोडक्ट टाइप', 400));
   }
 
   saleData.amount = amount;
   const sale = await ProductSale.create(saleData);
 
-  await User.findByIdAndUpdate(req.user._id, {
-    $inc: {
-      'licenseStats.totalLicensesSold': 1,
-      'licenseStats.monthlyLicensesSold': 1,
-    }
-  });
+  if (productType === 'license') {
+    await User.findByIdAndUpdate(req.user._id, {
+      $inc: {
+        'licenseStats.totalLicensesSold': 1,
+        'licenseStats.monthlyLicensesSold': 1,
+      }
+    });
+  }
 
-  await calculateCommission(req.user._id, amount, productType === 'license' ? 'license_sale' : 'education_sale', sale._id);
+  const commissionType = productType === 'license' ? 'license_sale' : 'education_sale';
+  await calculateCommission(req.user._id, amount, commissionType, sale._id);
+
+  sale.commissionDistributed = true;
+  await sale.save();
 
   res.status(201).json({ success: true, data: sale });
 });
 
 // @desc   Get own sales history (seller)
-exports.getMySales = asyncHandler(async (req, res) => {
+// @route  GET /api/products/my-sales
+exports.getMySales = catchAsync(async (req, res) => {
   const sales = await ProductSale.find({ soldBy: req.user._id })
     .populate('licenseType', 'name')
-    .populate('educationProgram', 'title')
+    .populate('educationProgram', 'class fee')
     .sort({ purchaseDate: -1 });
 
   res.json({ success: true, data: sales });
 });
 
 // @desc   Get purchases of current logged-in user (as customer)
-exports.getMyPurchases = asyncHandler(async (req, res) => {
+// @route  GET /api/products/my-purchases
+exports.getMyPurchases = catchAsync(async (req, res) => {
   const purchases = await ProductSale.find({ customer: req.user._id })
     .populate('licenseType', 'name')
-    .populate('educationProgram', 'title fee')
+    .populate('educationProgram', 'class fee')
     .sort({ purchaseDate: -1 });
 
   res.json({ success: true, data: purchases });
 });
 
 // @desc   Admin – get all sales
-exports.getAllSales = asyncHandler(async (req, res) => {
+// @route  GET /api/products/all-sales
+exports.getAllSales = catchAsync(async (req, res) => {
   const sales = await ProductSale.find()
     .populate('licenseType', 'name')
-    .populate('educationProgram', 'title')
+    .populate('educationProgram', 'class fee')
     .populate('soldBy', 'fullName email role')
     .sort({ purchaseDate: -1 });
 

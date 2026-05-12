@@ -1,15 +1,16 @@
-// backend/src/controllers/fieldDashboard.controller.js
 const Donation = require('../models/Donation');
 const Beneficiary = require('../models/Beneficiary');
 const Campaign = require('../models/Campaign');
 const Event = require('../models/Event');
 const Expense = require('../models/Expense');
 const User = require('../models/user.model');
+const LicensePurchase = require('../models/LicensePurchase');
+const CommissionTransaction = require('../models/CommissionTransaction');
 
-// NOTE: यह फंक्शन अब getDashboardStats नाम से एक्सपोर्ट हो रहा है
+// @desc   Get dashboard stats (scoped)
 exports.getDashboardStats = async (req, res) => {
   try {
-    const filter = { ...req.scopeFilter };  // scopeFilter middleware से सेट हुआ
+    const filter = { ...req.scopeFilter };
 
     const [
       totalDonations,
@@ -29,7 +30,8 @@ exports.getDashboardStats = async (req, res) => {
       Campaign.countDocuments({ ...filter, status: 'active' }),
       Event.countDocuments({ ...filter, eventDate: { $gte: new Date() } }),
       Expense.countDocuments(filter),
-      User.countDocuments({ ...filter, membershipStatus: 'active' }),
+      // ✅ फ़िक्स: isActive + isDeleted का इस्तेमाल
+      User.countDocuments({ ...filter, isActive: true, isDeleted: false }),
     ]);
 
     res.json({
@@ -49,7 +51,7 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
-// बाकी के फंक्शन (तेरी जरूरत के हिसाब से) – ये पहले जैसे ही रह सकते हैं
+// @desc   Get team members under the current user
 exports.getTeam = async (req, res) => {
   try {
     const team = await User.find({ reportsTo: req.user._id, isDeleted: false })
@@ -60,9 +62,9 @@ exports.getTeam = async (req, res) => {
   }
 };
 
+// @desc   Get licenses sold by current user
 exports.getLicenses = async (req, res) => {
   try {
-    const LicensePurchase = require('../models/LicensePurchase');
     const purchases = await LicensePurchase.find({ soldBy: req.user._id })
       .populate('licenseType', 'name')
       .sort('-purchaseDate');
@@ -72,10 +74,10 @@ exports.getLicenses = async (req, res) => {
   }
 };
 
+// @desc   Get my commissions (using CommissionTransaction)
 exports.getCommissions = async (req, res) => {
   try {
-    const Transaction = require('../models/Transaction.model');
-    const commissions = await Transaction.find({ user: req.user._id, type: 'commission' })
+    const commissions = await CommissionTransaction.find({ user: req.user._id })
       .sort('-createdAt');
     res.json({ success: true, commissions });
   } catch (error) {
@@ -83,23 +85,25 @@ exports.getCommissions = async (req, res) => {
   }
 };
 
+// @desc   Contributions placeholder (WeeklyContribution model not yet built)
 exports.getContributions = async (req, res) => {
   try {
-    const WeeklyContribution = require('../models/WeeklyContribution');
-    const contributions = await WeeklyContribution.find({ gramVikasAdhikari: req.user._id })
-      .sort('-date');
-    res.json({ success: true, contributions });
+    // const WeeklyContribution = require('../models/WeeklyContribution');
+    // const contributions = await WeeklyContribution.find({ gramVikasAdhikari: req.user._id }).sort('-date');
+    // res.json({ success: true, contributions });
+    res.json({ success: true, contributions: [] });   // placeholder
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
+// @desc   Meetings placeholder (Meeting model not yet built)
 exports.getMeetings = async (req, res) => {
   try {
-    const Meeting = require('../models/Meeting');
-    const meetings = await Meeting.find({ host: req.user._id })
-      .sort('-startTime');
-    res.json({ success: true, meetings });
+    // const Meeting = require('../models/Meeting');
+    // const meetings = await Meeting.find({ host: req.user._id }).sort('-startTime');
+    // res.json({ success: true, meetings });
+    res.json({ success: true, meetings: [] });         // placeholder
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

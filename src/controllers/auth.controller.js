@@ -7,41 +7,19 @@ const path = require('path');
 const fs = require('fs').promises;
 const { validationResult } = require('express-validator');
 
-// ✅ Final Role List (Client Approved)
 const VALID_ROLES = [
-  'SUPER_ADMIN',
-  'ADDITIONAL_DIRECTOR',
-  'STATE_DEVELOPMENT_COORDINATOR',
-  'DISTRICT_BRANCH_MANAGER',
-  'DISTRICT_PRESIDENT',
-  'DISTRICT_FIELD_COORDINATOR',
-  'BAMS_DOCTOR',
-  'BLOCK_DEVELOPMENT_COORDINATOR',
-  'GRAM_DEVELOPMENT_COORDINATOR',
-  'IT_DEVELOPER',
-  'TEACHER',
-  'NEWS_EDITOR',
-  'AGRICULTURE_CONSULTANCY',
-  'FINANCE_SERVICE_CONSULTANCY',
-  'NGO_CONSULTANCY',
-  'PROJECT_BASED_INTEGRATED_ROLE',
-  'VENDOR',
-  'AGENT',
-  'USER',
+  'SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_DEVELOPMENT_COORDINATOR',
+  'DISTRICT_BRANCH_MANAGER', 'DISTRICT_PRESIDENT', 'DISTRICT_FIELD_COORDINATOR',
+  'BAMS_DOCTOR', 'BLOCK_DEVELOPMENT_COORDINATOR', 'GRAM_DEVELOPMENT_COORDINATOR',
+  'IT_DEVELOPER', 'TEACHER', 'NEWS_EDITOR', 'AGRICULTURE_CONSULTANCY',
+  'FINANCE_SERVICE_CONSULTANCY', 'NGO_CONSULTANCY', 'PROJECT_BASED_INTEGRATED_ROLE',
+  'VENDOR', 'AGENT', 'USER',
 ];
 
-// 🆕 Roles that MUST provide a sponsor referral code
 const ROLES_REQUIRING_SPONSOR = [
-  'ADDITIONAL_DIRECTOR',
-  'STATE_DEVELOPMENT_COORDINATOR',
-  'DISTRICT_BRANCH_MANAGER',
-  'DISTRICT_PRESIDENT',
-  'DISTRICT_FIELD_COORDINATOR',
-  'BAMS_DOCTOR',
-  'BLOCK_DEVELOPMENT_COORDINATOR',
-  'GRAM_DEVELOPMENT_COORDINATOR',
-  'VENDOR',
-  'AGENT',
+  'ADDITIONAL_DIRECTOR', 'STATE_DEVELOPMENT_COORDINATOR', 'DISTRICT_BRANCH_MANAGER',
+  'DISTRICT_PRESIDENT', 'DISTRICT_FIELD_COORDINATOR', 'BAMS_DOCTOR',
+  'BLOCK_DEVELOPMENT_COORDINATOR', 'GRAM_DEVELOPMENT_COORDINATOR', 'VENDOR', 'AGENT',
 ];
 
 const uploadDir = path.join(__dirname, '../uploads');
@@ -64,47 +42,28 @@ const parseArray = (value) => {
   return [];
 };
 
-// ======================
-// REGISTER
-// ======================
+// ====================== REGISTER ======================
 exports.register = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ success: false, errors: errors.array() });
     }
-
     const {
-      fullName, name, email, phone, mobile, password,
-      role, modules,
+      fullName, name, email, phone, mobile, password, role, modules,
       fatherName, motherName, dob, dateOfBirth, gender,
       aadhaarNumber, aadharCard, panNumber, panCard, voterId, passportNumber,
       state, district, block, village, pincode, fullAddress,
       reportsTo, sponsorId, sponsorReferral,
-      // TEACHER
       specialization, qualifications, experienceYears,
-      // DOCTOR / BAMS
       doctorSpecialization, doctorExperience, consultationFee, registrationNumber,
-      // DOCTOR VERIFICATION
       qualification, college, yearOfPassing, medicalCouncilRegNumber,
-      // FARMER
       landSize, crops, farmingType, isContractFarmer, farmLocation, irrigationType,
-      // STUDENT
       className, schoolName, board, percentage,
-      // IT
       projectType, techStack, experience,
-      // SOCIAL
       username, bio, interests,
-      // BANK
-      bankAccount,
-      // MEDIA
-      isMediaCreator,
-      // SELLER
-      isSeller, storeName, gstNumber,
-      // PAYMENT
-      upiId,
-      // QA
-      developedBy, testedBy, qaStatus
+      bankAccount, isMediaCreator, isSeller, storeName, gstNumber,
+      upiId, developedBy, testedBy, qaStatus
     } = req.body;
 
     const finalName = fullName || name;
@@ -123,32 +82,20 @@ exports.register = async (req, res) => {
       return res.status(400).json({ success: false, message: 'User already exists' });
     }
 
-    // ── 🔍 SPONSOR RESOLUTION ──
     let resolvedSponsor = null;
     if (sponsorId) {
       resolvedSponsor = await User.findById(sponsorId);
-      if (!resolvedSponsor) {
-        return res.status(400).json({ success: false, message: 'Invalid sponsor ID' });
-      }
+      if (!resolvedSponsor) return res.status(400).json({ success: false, message: 'Invalid sponsor ID' });
     } else if (sponsorReferral && sponsorReferral.trim() !== '') {
       resolvedSponsor = await User.findOne({ referralCode: sponsorReferral.trim() });
-      if (!resolvedSponsor) {
-        return res.status(400).json({ success: false, message: 'Invalid sponsor referral code' });
-      }
+      if (!resolvedSponsor) return res.status(400).json({ success: false, message: 'Invalid sponsor referral code' });
     }
 
-    // 🆕 Check if the selected role requires a sponsor
     let mappedRole = (role || 'USER').toUpperCase();
     if (!VALID_ROLES.includes(mappedRole)) mappedRole = 'USER';
-
     if (ROLES_REQUIRING_SPONSOR.includes(mappedRole) && !resolvedSponsor) {
-      return res.status(400).json({
-        success: false,
-        message: `रोल ${mappedRole} के लिए स्पॉन्सर रेफ़रल कोड अनिवार्य है। कृपया एक वैध रेफ़रल कोड प्रदान करें।`
-      });
+      return res.status(400).json({ success: false, message: `रोल ${mappedRole} के लिए स्पॉन्सर रेफ़रल कोड अनिवार्य है।` });
     }
-
-    // 🆕 Prevent self-referral
     if (resolvedSponsor && resolvedSponsor.email === finalEmail) {
       return res.status(400).json({ success: false, message: 'आप स्वयं अपने स्पॉन्सर नहीं बन सकते' });
     }
@@ -171,40 +118,28 @@ exports.register = async (req, res) => {
     }
 
     const userData = {
-      fullName: finalName,
-      email: finalEmail,
-      phone: finalPhone,
-      password,
-      role: mappedRole,
-      modules: userModules,
-      fatherName, motherName,
-      dob: finalDob ? new Date(finalDob) : undefined,
+      fullName: finalName, email: finalEmail, phone: finalPhone, password, role: mappedRole,
+      modules: userModules, fatherName, motherName, dob: null,
       gender: gender && gender !== '' ? gender : undefined,
-      aadhaarNumber: finalAadhaar,
-      panNumber: finalPan,
-      voterId, passportNumber,
+      aadhaarNumber: finalAadhaar, panNumber: finalPan, voterId, passportNumber,
       state, district, block, village, pincode, fullAddress,
-      otp: hashedOtp,
-      otpExpire: Date.now() + 5 * 60 * 1000,
-      reportsTo: reportsTo || null,
-      sponsorId: resolvedSponsor ? resolvedSponsor._id : null,
-      createdBy: req.user ? req.user.id : null,
-      updatedBy: req.user ? req.user.id : null,
+      otp: hashedOtp, otpExpire: Date.now() + 5 * 60 * 1000,
+      reportsTo: reportsTo || null, sponsorId: resolvedSponsor ? resolvedSponsor._id : null,
+      createdBy: req.user ? req.user.id : null, updatedBy: req.user ? req.user.id : null,
       aiUsage: { diseaseDetectionCount: 0, aiTokensRemaining: 10 },
       incentivePayoutInfo: { pendingIncentive: 0, totalWithdrawn: 0 },
-      paymentInfo: {},
-      twoFactorEnabled: false,
-      isDeleted: false,
-      developedBy: developedBy || null,
-      testedBy: testedBy || null,
-      qaStatus: qaStatus || 'pending',
+      paymentInfo: {}, twoFactorEnabled: false, isDeleted: false,
+      developedBy: developedBy || null, testedBy: testedBy || null, qaStatus: qaStatus || 'pending',
       licenseStats: { totalLicensesSold: 0, monthlyLicensesSold: 0, lastMonthReset: new Date(), salaryEligible: false },
       contractStatus: 'draft',
     };
 
+    if (finalDob) {
+      const parsedDob = new Date(finalDob);
+      if (!isNaN(parsedDob.getTime())) userData.dob = parsedDob;
+    }
     if (upiId) userData.paymentInfo.upiId = upiId;
 
-    // Teacher profile
     if (mappedRole === 'TEACHER' || userModules.includes('EDUCATION')) {
       userData.teacherProfile = {
         specialization: specialization || '',
@@ -213,8 +148,6 @@ exports.register = async (req, res) => {
         earnings: 0,
       };
     }
-
-    // Doctor profile
     if (mappedRole === 'BAMS_DOCTOR' || userModules.includes('HEALTHCARE')) {
       userData.doctorProfile = {
         specialization: doctorSpecialization || '',
@@ -223,52 +156,36 @@ exports.register = async (req, res) => {
         registrationNumber: registrationNumber || '',
       };
       userData.doctorVerification = {
-        qualification: qualification || '',
-        college: college || '',
+        qualification: qualification || '', college: college || '',
         yearOfPassing: yearOfPassing ? parseInt(yearOfPassing) : null,
         medicalCouncilRegNumber: medicalCouncilRegNumber || '',
         verificationStatus: 'pending',
       };
     }
-
-    // Farmer profile
     if (userModules.includes('AGRICULTURE')) {
       userData.farmerProfile = {
         landSize: landSize ? parseInt(landSize) : 0,
         crops: parseArray(crops),
         farmingType: farmingType || 'conventional',
         isContractFarmer: isContractFarmer === 'true' || isContractFarmer === true,
-        farmLocation: farmLocation || '',
-        irrigationType: irrigationType || '',
+        farmLocation: farmLocation || '', irrigationType: irrigationType || '',
       };
     }
-
-    // Education profile
     if (userModules.includes('EDUCATION')) {
       userData.educationProfile = { className: className || '', schoolName: schoolName || '', board: board || '', percentage: percentage || '' };
     }
-
-    // IT profile
     if (userModules.includes('IT')) {
       userData.itProfile = { projectType: projectType || '', techStack: techStack || '', experience: experience || '' };
     }
-
-    // Social profile
     if (userModules.includes('SOCIAL')) {
       userData.socialProfile = { username: username || '', bio: bio || '', interests: interests || '', followersCount: 0, followingCount: 0 };
     }
-
-    // Media creator
     if (userModules.includes('MEDIA') || isMediaCreator === 'true' || isMediaCreator === true) {
       userData.mediaCreatorProfile = { isCreator: true, creatorStatus: 'pending', totalPosts: 0, totalFollowers: 0, monetizationEarnings: 0, liveStreamingKey: Math.random().toString(36).substring(2, 15) };
     }
-
-    // Seller profile
     if (userModules.includes('ECOMMERCE') || isSeller === 'true' || isSeller === true) {
       userData.sellerProfile = { isSeller: true, storeName: storeName || `${finalName}'s Store`, gstNumber: gstNumber || '', rating: 0 };
     }
-
-    // Bank account
     if (bankAccount) {
       try {
         userData.bankAccount = typeof bankAccount === 'string' ? JSON.parse(bankAccount) : bankAccount;
@@ -279,7 +196,6 @@ exports.register = async (req, res) => {
 
     const user = new User(userData);
 
-    // Handle file uploads
     if (req.files) {
       const moveFile = async (fieldName, prefix) => {
         const file = req.files[fieldName]?.[0];
@@ -303,8 +219,10 @@ exports.register = async (req, res) => {
       if (panImg) user.panImage = panImg;
 
       const storeLogo = await moveFile('storeLogo', 'store_logo');
-      if (storeLogo && user.sellerProfile) user.sellerProfile.storeLogo = storeLogo;
-
+      if (storeLogo) {
+        if (!user.sellerProfile) user.sellerProfile = { isSeller: true, storeName: `${finalName}'s Store`, gstNumber: '', rating: 0 };
+        user.sellerProfile.storeLogo = storeLogo;
+      }
       const degreeCert = await moveFile('degreeCertificate', 'degree');
       const regCert = await moveFile('registrationCertificate', 'regcert');
       if (degreeCert || regCert) {
@@ -314,19 +232,15 @@ exports.register = async (req, res) => {
       }
     }
 
-    // Update sponsor's team & binary placement
     if (resolvedSponsor) {
       resolvedSponsor.teamSize = (resolvedSponsor.teamSize || 0) + 1;
-      if (!resolvedSponsor.leftChild) {
-        resolvedSponsor.leftChild = user._id;
-      } else if (!resolvedSponsor.rightChild) {
-        resolvedSponsor.rightChild = user._id;
-      }
+      if (!resolvedSponsor.leftChild) resolvedSponsor.leftChild = user._id;
+      else if (!resolvedSponsor.rightChild) resolvedSponsor.rightChild = user._id;
       await resolvedSponsor.save();
     }
 
     await user.save();
-    sendEmail(finalEmail, otp).catch(err => console.error('Email error:', err));
+    sendEmail.sendOTP(finalEmail, otp).catch(err => console.error('Email error:', err));
 
     res.status(201).json({ success: true, message: 'OTP sent to email. Please verify.', email: user.email });
   } catch (error) {
@@ -345,9 +259,7 @@ exports.register = async (req, res) => {
   }
 };
 
-// ======================
-// VERIFY OTP
-// ======================
+// ====================== VERIFY OTP ======================
 exports.verifyOTP = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -380,9 +292,7 @@ exports.verifyOTP = async (req, res) => {
   }
 };
 
-// ======================
-// RESEND OTP
-// ======================
+// ====================== RESEND OTP ======================
 exports.resendOTP = async (req, res) => {
   try {
     const { email } = req.body;
@@ -394,16 +304,14 @@ exports.resendOTP = async (req, res) => {
     user.otp = await hashOTP(otp);
     user.otpExpire = Date.now() + 5 * 60 * 1000;
     await user.save();
-    await sendEmail(email, otp);
+    await sendEmail.sendOTP(email, otp);
     res.json({ success: true, message: 'OTP resent successfully' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// ======================
-// LOGIN
-// ======================
+// ====================== LOGIN ======================
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -435,9 +343,7 @@ exports.login = async (req, res) => {
   }
 };
 
-// ======================
-// FORGOT PASSWORD - SEND OTP
-// ======================
+// ====================== FORGOT PASSWORD - SEND OTP ======================
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -449,7 +355,7 @@ exports.forgotPassword = async (req, res) => {
     user.otp = await hashOTP(otp);
     user.otpExpire = Date.now() + 10 * 60 * 1000;
     await user.save();
-    await sendEmail(email, otp).catch(err => console.error('Email error:', err));
+    await sendEmail.sendOTP(email, otp).catch(err => console.error('Email error:', err));
 
     res.json({ success: true, message: 'OTP sent to your email' });
   } catch (error) {
@@ -457,9 +363,7 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
-// ======================
-// VERIFY OTP FOR PASSWORD RESET
-// ======================
+// ====================== VERIFY OTP FOR PASSWORD RESET ======================
 exports.verifyResetOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -475,9 +379,7 @@ exports.verifyResetOtp = async (req, res) => {
   }
 };
 
-// ======================
-// RESET PASSWORD
-// ======================
+// ====================== RESET PASSWORD ======================
 exports.resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
@@ -500,27 +402,22 @@ exports.resetPassword = async (req, res) => {
   }
 };
 
-// ======================
-// GET PROFILE
-// ======================
+// ====================== GET PROFILE ======================
 exports.getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user.id)
       .select('-password -otp -otpExpire')
       .populate('reportsTo', 'fullName email role')
       .populate('sponsorId', 'fullName email');
-
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     res.json({ success: true, user });
   } catch (error) {
     console.error('Get profile error:', error);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
-// ======================
-// UPDATE PROFILE
-// ======================
+// ====================== UPDATE PROFILE ======================
 exports.updateProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -577,7 +474,6 @@ exports.updateProfile = async (req, res) => {
       if (req.body.consultationFee !== undefined) user.doctorProfile.consultationFee = parseFloat(req.body.consultationFee);
       if (req.body.registrationNumber !== undefined) user.doctorProfile.registrationNumber = req.body.registrationNumber;
     }
-
     // Doctor verification
     if (req.body.qualification !== undefined || req.body.college !== undefined || req.body.yearOfPassing !== undefined || req.body.medicalCouncilRegNumber !== undefined) {
       user.doctorVerification = user.doctorVerification || {};
@@ -681,6 +577,7 @@ exports.updateProfile = async (req, res) => {
 
     res.json({ success: true, message: 'Profile updated', user: userData });
   } catch (error) {
+    // Cleanup files if needed
     if (req.files) {
       for (const field in req.files) {
         for (const file of req.files[field]) {
@@ -696,9 +593,7 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
-// ======================
-// ASSIGN HIERARCHY
-// ======================
+// ====================== ASSIGN HIERARCHY ======================
 exports.assignReporting = async (req, res) => {
   try {
     const { userId, reportsToId, sponsorId } = req.body;
@@ -722,9 +617,7 @@ exports.assignReporting = async (req, res) => {
   }
 };
 
-// ======================
-// GET SUBORDINATES
-// ======================
+// ====================== GET SUBORDINATES ======================
 exports.getSubordinates = async (req, res) => {
   try {
     const userId = req.params.id || req.user.id;
@@ -736,9 +629,7 @@ exports.getSubordinates = async (req, res) => {
   }
 };
 
-// ======================
-// GET ALL USERS (Admin)
-// ======================
+// ====================== GET ALL USERS (Admin) ======================
 exports.getAllUsers = async (req, res) => {
   try {
     const { role, isVerified, page = 1, limit = 20, includeDeleted } = req.query;
@@ -754,9 +645,7 @@ exports.getAllUsers = async (req, res) => {
   }
 };
 
-// ======================
-// GET USER BY ID (Admin)
-// ======================
+// ====================== GET USER BY ID (Admin) ======================
 exports.getUserById = async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('-password -otp -otpExpire').populate('reportsTo sponsorId', 'fullName email role');
@@ -767,16 +656,17 @@ exports.getUserById = async (req, res) => {
   }
 };
 
-// ======================
-// DELETE USER (Admin)
-// ======================
+// ====================== DELETE USER (Admin) ======================
 exports.deleteUser = async (req, res) => {
   try {
     const { hardDelete } = req.query;
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     if (hardDelete === 'true') {
-      if (user.profileImage) { const fp = path.join(__dirname, '../', user.profileImage); await fs.unlink(fp).catch(() => {}); }
+      if (user.profileImage) {
+        const fp = path.join(__dirname, '../', user.profileImage);
+        await fs.unlink(fp).catch(() => {});
+      }
       await User.findByIdAndDelete(req.params.id);
       res.json({ success: true, message: 'User permanently deleted' });
     } else {
@@ -789,9 +679,7 @@ exports.deleteUser = async (req, res) => {
   }
 };
 
-// ======================
-// RESTORE USER
-// ======================
+// ====================== RESTORE USER ======================
 exports.restoreUser = async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
@@ -804,9 +692,7 @@ exports.restoreUser = async (req, res) => {
   }
 };
 
-// ======================
-// UPDATE AI TOKENS (Admin)
-// ======================
+// ====================== UPDATE AI TOKENS (Admin) ======================
 exports.updateAITokens = async (req, res) => {
   try {
     const { userId, tokens } = req.body;
@@ -821,9 +707,7 @@ exports.updateAITokens = async (req, res) => {
   }
 };
 
-// ======================
-// INCREMENT AI USAGE
-// ======================
+// ====================== INCREMENT AI USAGE ======================
 exports.incrementAIUsage = async (req, res) => {
   try {
     const { type } = req.body;
@@ -840,9 +724,7 @@ exports.incrementAIUsage = async (req, res) => {
   }
 };
 
-// ======================
-// ADD SUBSCRIPTION HISTORY
-// ======================
+// ====================== ADD SUBSCRIPTION HISTORY ======================
 exports.addSubscriptionHistory = async (req, res) => {
   try {
     const { userId, plan, startDate, endDate, amountPaid, transactionId } = req.body;
@@ -857,9 +739,7 @@ exports.addSubscriptionHistory = async (req, res) => {
   }
 };
 
-// ======================
-// UPDATE INCENTIVE PAYOUT
-// ======================
+// ====================== UPDATE INCENTIVE PAYOUT ======================
 exports.updateIncentivePayout = async (req, res) => {
   try {
     const { userId, pendingIncentive, totalWithdrawn, lastPayoutDate, nextPayoutDate } = req.body;
@@ -877,9 +757,7 @@ exports.updateIncentivePayout = async (req, res) => {
   }
 };
 
-// ======================
-// UPDATE WALLET
-// ======================
+// ====================== UPDATE WALLET ======================
 exports.updateWallet = async (req, res) => {
   try {
     const { userId, amount, operation } = req.body;
@@ -900,9 +778,7 @@ exports.updateWallet = async (req, res) => {
   }
 };
 
-// ======================
-// ADD HEALTH RECORD
-// ======================
+// ====================== ADD HEALTH RECORD ======================
 exports.addHealthRecord = async (req, res) => {
   try {
     const { recordType, title, description, date } = req.body;
@@ -926,9 +802,7 @@ exports.addHealthRecord = async (req, res) => {
   }
 };
 
-// ======================
-// ADD PRODUCT LISTING
-// ======================
+// ====================== ADD PRODUCT LISTING ======================
 exports.addProductListing = async (req, res) => {
   try {
     const { name, price, quantity, unit, category, description } = req.body;
@@ -952,9 +826,7 @@ exports.addProductListing = async (req, res) => {
   }
 };
 
-// ======================
-// ADD CONTRACT FARMING
-// ======================
+// ====================== ADD CONTRACT FARMING ======================
 exports.addContractFarming = async (req, res) => {
   try {
     const { buyerId, quantity, pricePerUnit, startDate, endDate } = req.body;
@@ -970,9 +842,7 @@ exports.addContractFarming = async (req, res) => {
   }
 };
 
-// ======================
-// ADD LOAN
-// ======================
+// ====================== ADD LOAN ======================
 exports.addLoan = async (req, res) => {
   try {
     const { amount, emiAmount, tenureMonths } = req.body;
@@ -987,9 +857,7 @@ exports.addLoan = async (req, res) => {
   }
 };
 
-// ======================
-// ADD CLIENT
-// ======================
+// ====================== ADD CLIENT ======================
 exports.addClient = async (req, res) => {
   try {
     const { name, email, phone, company, gstNumber, address } = req.body;
@@ -1004,9 +872,7 @@ exports.addClient = async (req, res) => {
   }
 };
 
-// ======================
-// ADD PROJECT
-// ======================
+// ====================== ADD PROJECT ======================
 exports.addProject = async (req, res) => {
   try {
     const { name, description, clientId, startDate, endDate, budget } = req.body;
@@ -1021,9 +887,7 @@ exports.addProject = async (req, res) => {
   }
 };
 
-// ======================
-// ADD STORE PRODUCT
-// ======================
+// ====================== ADD STORE PRODUCT ======================
 exports.addStoreProduct = async (req, res) => {
   try {
     const { name, price, category, stock, description } = req.body;

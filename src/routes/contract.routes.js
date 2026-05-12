@@ -6,9 +6,13 @@ const path = require('path');
 const { protect, restrictTo } = require('../middleware');
 const contractController = require('../controllers/contract.controller');
 
-// Multer for signature upload
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, path.join(__dirname, '../uploads/signatures')),
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, '../uploads/signatures');
+    // Ensure directory exists (you can do this once at startup)
+    require('fs').mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
   filename: (req, file, cb) => {
     const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, unique + path.extname(file.originalname));
@@ -16,41 +20,13 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// ─── Admin routes ───
-// Create or update contract for a role
-router.post(
-  '/',
-  protect,
-  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
-  contractController.createOrUpdateContract
-);
+// Admin routes
+router.post('/', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), contractController.createOrUpdateContract);
+router.get('/all', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), contractController.getAllContracts);
+router.patch('/:userId/review', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), contractController.reviewContract);
 
-// Get all contracts
-router.get(
-  '/all',
-  protect,
-  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
-  contractController.getAllContracts
-);
-
-// Review/approve user contract
-router.patch(
-  '/:userId/review',
-  protect,
-  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
-  contractController.reviewContract
-);
-
-// ─── User routes ───
-// Get my contract (based on user's role)
+// User routes
 router.get('/my', protect, contractController.getMyContract);
-
-// Sign / complete my contract
-router.put(
-  '/my',
-  protect,
-  upload.single('signature'),
-  contractController.updateMyContract
-);
+router.put('/my', protect, upload.single('signature'), contractController.updateMyContract);
 
 module.exports = router;

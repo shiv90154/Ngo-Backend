@@ -109,10 +109,15 @@ const userSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
       default: undefined,
-      set: v => (v === '' ? null : v),
+      set: v => (v === '' ? null : v),                // ✅ नया सेटर जोड़ा गया
     },
     aadhaarImage: String,
     panImage: String,
+
+    // ✅ नए पहचान पत्र (KYC के पास)
+    voterId: { type: String, trim: true },
+    passportNumber: { type: String, trim: true },
+
     state: { type: String, trim: true },
     district: { type: String, trim: true },
     block: { type: String, trim: true },
@@ -162,6 +167,14 @@ const userSchema = new mongoose.Schema(
         attendedAt: Date,
       },
     ],
+
+    // ✅ स्टूडेंट एजुकेशन प्रोफाइल (नया)
+    educationProfile: {
+      className: String,
+      schoolName: String,
+      board: String,
+      percentage: String,
+    },
 
     // ========== HEALTHCARE MODULE ==========
     doctorProfile: {
@@ -278,12 +291,28 @@ const userSchema = new mongoose.Schema(
       salaryEligible: { type: Boolean, default: false },
     },
 
-    // ========== CONTRACT STATUS ==========
+    
     contractStatus: {
       type: String,
       enum: ['draft', 'completed', 'rejected'],
       default: 'draft',
     },
+    
+    processingFee: {
+      type: Number,
+      default: 0,
+    },
+    securityDeposit: {
+      type: Number,
+      default: 0,
+    },
+    contractCompletedAt: Date,
+    contractRejectionReason: String,
+    contractReviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    contractReviewedAt: Date,
 
     // ========== NEWS & MEDIA MODULE ==========
     mediaCreatorProfile: {
@@ -307,6 +336,45 @@ const userSchema = new mongoose.Schema(
     },
     storeProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'StoreProduct' }],
     exchangeRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'ExchangeRequest' }],
+
+    // ✅ CRM - क्लाइंट और प्रोजेक्ट (नया)
+    clients: [{
+      name: String,
+      email: String,
+      phone: String,
+      company: String,
+      gstNumber: String,
+      address: String,
+      createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      createdAt: { type: Date, default: Date.now },
+    }],
+    projects: [{
+      name: String,
+      description: String,
+      clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      startDate: Date,
+      endDate: Date,
+      budget: Number,
+      status: { type: String, enum: ['active', 'completed', 'on-hold'], default: 'active' },
+      createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      createdAt: { type: Date, default: Date.now },
+    }],
+
+    // ✅ IT प्रोफाइल (नया)
+    itProfile: {
+      projectType: String,
+      techStack: String,
+      experience: String,
+    },
+
+    // ✅ सोशल प्रोफाइल (नया)
+    socialProfile: {
+      username: String,
+      bio: String,
+      interests: String,
+      followersCount: { type: Number, default: 0 },
+      followingCount: { type: Number, default: 0 },
+    },
 
     // ========== SUBSCRIPTION & OTP ==========
     otp: String,
@@ -390,6 +458,7 @@ userSchema.statics.generateUniqueReferralCode = async function () {
 };
 
 // ========== PRE‑SAVE HOOKS ==========
+// ========== PRE‑SAVE HOOKS ==========
 userSchema.pre('save', async function () {
   if (this.isModified('password')) {
     const salt = await bcrypt.genSalt(10);
@@ -403,6 +472,7 @@ userSchema.pre('save', async function () {
   if (this.isNew && !this.hierarchyLevel) {
     this.hierarchyLevel = roleLevelMap[this.role] || 12;
   }
+  // No next() call – Mongoose 6+ handles async hooks automatically
 });
 
 // ========== INSTANCE METHODS ==========

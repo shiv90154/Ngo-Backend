@@ -6,9 +6,9 @@ const { NGO_ORGANIZATIONAL_ROLES } = require('../config/roles');
 
 const ALLOWED = ['SUPER_ADMIN', ...NGO_ORGANIZATIONAL_ROLES];
 
-// Public – only protect
+// Public
 router.get('/active', protect, campaignController.getActiveCampaigns);
-router.get('/all', protect, campaignController.getAllCampaigns);   // all can see, but admin can manage
+router.get('/all', protect, campaignController.getAllCampaigns);
 router.post('/donate', protect, campaignController.donateToCampaign);
 
 // Admin / NGO Management

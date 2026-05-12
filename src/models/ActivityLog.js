@@ -1,9 +1,8 @@
 const mongoose = require('mongoose');
-const logSchema = new mongoose.Schema({
+const activityLogSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  action: String,            // e.g., "USER_UPDATED", "COURSE_CREATED"
+  action: String,
   details: String,
-  ip: String,
   createdAt: { type: Date, default: Date.now }
 });
-module.exports = mongoose.model('ActivityLog', logSchema);
+module.exports = mongoose.model('ActivityLog', activityLogSchema);

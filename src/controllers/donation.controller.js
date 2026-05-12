@@ -1,6 +1,6 @@
-// backend/src/controllers/donation.controller.js
 const Donation = require('../models/Donation');
-const asyncHandler = require('express-async-handler');
+const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/AppError');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 
@@ -10,14 +10,14 @@ const razorpay = new Razorpay({
 });
 
 // ── 1️⃣ Create Razorpay order for online donation ──
-exports.createDonationOrder = asyncHandler(async (req, res) => {
-  const { amount } = req.body; // in INR
+exports.createDonationOrder = catchAsync(async (req, res, next) => {
+  const { amount } = req.body; // amount in INR
   if (!amount || amount < 1) {
-    return res.status(400).json({ success: false, message: 'राशि आवश्यक है' });
+    return next(new AppError('दान की राशि आवश्यक है', 400));
   }
 
   const options = {
-    amount: amount * 100, // convert to paise
+    amount: amount * 100, // paise
     currency: 'INR',
     receipt: `donation_${Date.now()}`,
     notes: {
@@ -35,16 +35,20 @@ exports.createDonationOrder = asyncHandler(async (req, res) => {
   });
 });
 
-// ── 2️⃣ Verify payment & record donation ──
-exports.verifyDonationPayment = asyncHandler(async (req, res) => {
+// ── 2️⃣ Verify payment & record online donation ──
+exports.verifyDonationPayment = catchAsync(async (req, res, next) => {
   const {
     razorpay_order_id,
     razorpay_payment_id,
     razorpay_signature,
     donorName,
     purpose,
-    amount,
+    amount,          // INR amount (from frontend)
   } = req.body;
+
+  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !amount) {
+    return next(new AppError('सभी पेमेंट डिटेल आवश्यक हैं', 400));
+  }
 
   // Verify signature
   const generatedSignature = crypto
@@ -53,14 +57,14 @@ exports.verifyDonationPayment = asyncHandler(async (req, res) => {
     .digest('hex');
 
   if (generatedSignature !== razorpay_signature) {
-    return res.status(400).json({ success: false, message: 'Invalid payment signature' });
+    return next(new AppError('Invalid payment signature', 400));
   }
 
   // Create donation record
   const donation = await Donation.create({
     donorName: donorName || req.user.fullName,
     email: req.user.email,
-    amount: amount || req.body.amount / 100,   // fallback
+    amount,              // INR
     purpose: purpose || 'ऑनलाइन दान',
     user: req.user.id,
     type: 'online',
@@ -72,34 +76,46 @@ exports.verifyDonationPayment = asyncHandler(async (req, res) => {
     createdBy: req.user.id,
   });
 
-  // Optional: trigger incentive (if you want to reward donor's sponsor chain)
-  // const { calculateCommission } = require('../services/incentiveEngine');
+  // Optional: trigger incentive for donor's sponsor chain (uncomment if needed)
+  // const { calculateCommission } = require('../services/mlmEngine');
   // await calculateCommission(req.user.id, amount, 'donation', donation._id);
 
   res.json({ success: true, donation });
 });
 
-// ── PUBLIC: Any logged‑in user can donate (offline/cash mode is handled here too) ──
-exports.createDonation = asyncHandler(async (req, res) => {
-  const data = { ...req.body };
-  data.user = req.user.id;
-  // If it's a cash donation (offline), scope fields can be added from scopeFilter middleware (used in routes)
-  data.state = req.user.state;
-  data.district = req.user.district;
-  data.block = req.user.block;
-  data.village = req.user.village;
-  const donation = await Donation.create(data);
+// ── 3️⃣ Offline / cash donation (any logged-in user) ──
+exports.createDonation = catchAsync(async (req, res, next) => {
+  const { donorName, amount, purpose, type } = req.body;
+
+  if (!amount || amount < 0) {
+    return next(new AppError('दान की राशि आवश्यक है', 400));
+  }
+
+  const donation = await Donation.create({
+    donorName: donorName || req.user.fullName,
+    email: req.user.email,
+    amount,
+    purpose: purpose || 'नकद दान',
+    user: req.user.id,
+    type: type || 'cash',          // default to cash
+    state: req.user.state,
+    district: req.user.district,
+    block: req.user.block,
+    village: req.user.village,
+    createdBy: req.user.id,
+  });
+
   res.status(201).json({ success: true, donation });
 });
 
-// ── MY DONATIONS ──
-exports.getMyDonations = asyncHandler(async (req, res) => {
+// ── 4️⃣ My donations ──
+exports.getMyDonations = catchAsync(async (req, res, next) => {
   const donations = await Donation.find({ user: req.user.id }).sort({ createdAt: -1 });
   res.json({ success: true, donations });
 });
 
-// ── NGO / ADMIN: Scoped donations ──
-exports.getAllDonations = asyncHandler(async (req, res) => {
+// ── 5️⃣ NGO / Admin: GetAllDonations (scoped) ──
+exports.getAllDonations = catchAsync(async (req, res, next) => {
   const { page = 1, limit = 20, search } = req.query;
   const filter = { ...req.scopeFilter };
   if (search) {
@@ -123,14 +139,19 @@ exports.getAllDonations = asyncHandler(async (req, res) => {
   });
 });
 
-// ── NGO: Manual / offline donation entry ──
-exports.createCustomDonation = asyncHandler(async (req, res) => {
+// ── 6️⃣ NGO: Manual/offline donation entry (Admin / NGO) ──
+exports.createCustomDonation = catchAsync(async (req, res, next) => {
   const { donorName, email, amount, purpose, date, type } = req.body;
+
+  if (!amount || amount < 0) {
+    return next(new AppError('दान की राशि आवश्यक है', 400));
+  }
+
   const donation = await Donation.create({
     donorName,
     email,
     amount,
-    purpose,
+    purpose: purpose || 'नकद दान',
     date: date || new Date(),
     type: type || 'cash',
     createdBy: req.user.id,
@@ -139,5 +160,6 @@ exports.createCustomDonation = asyncHandler(async (req, res) => {
     block: req.user.block,
     village: req.user.village,
   });
+
   res.status(201).json({ success: true, donation });
 });

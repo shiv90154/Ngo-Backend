@@ -252,19 +252,18 @@ const sendNotification = async (email, subject, title, message) => {
 };
 
 // ==================================
-// पश्चगामी संगतता के लिए मुख्य निर्यात
+// ✅ फाइनल एक्सपोर्ट – कोई कन्फ्यूजन नहीं
 // ==================================
-module.exports = sendOTP;            // पुराने import के लिए डिफ़ॉल्ट
-
-// नए मॉड्यूल के लिए नामित निर्यात
-module.exports.sendOTP = sendOTP;
-module.exports.sendWelcome = sendWelcome;
-module.exports.sendPasswordReset = sendPasswordReset;
-module.exports.sendSubscriptionActivated = sendSubscriptionActivated;
-module.exports.sendSubscriptionExpiryReminder = sendSubscriptionExpiryReminder;
-module.exports.sendCommissionCredited = sendCommissionCredited;
-module.exports.sendAppointmentConfirmation = sendAppointmentConfirmation;
-module.exports.sendPrescriptionNotification = sendPrescriptionNotification;
-module.exports.sendCourseEnrollment = sendCourseEnrollment;
-module.exports.sendLoanSanctioned = sendLoanSanctioned;
-module.exports.sendNotification = sendNotification;
+module.exports = {
+  sendOTP,
+  sendWelcome,
+  sendPasswordReset,
+  sendSubscriptionActivated,
+  sendSubscriptionExpiryReminder,
+  sendCommissionCredited,
+  sendAppointmentConfirmation,
+  sendPrescriptionNotification,
+  sendCourseEnrollment,
+  sendLoanSanctioned,
+  sendNotification,
+};

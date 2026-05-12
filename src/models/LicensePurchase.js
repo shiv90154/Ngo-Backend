@@ -16,6 +16,19 @@ const licensePurchaseSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   },
+  customerName: {
+    type: String,
+    required: [true, 'ग्राहक का नाम ज़रूरी है'],
+    trim: true
+  },
+  customerPhone: {
+    type: String,
+    trim: true
+  },
+  amount: {
+    type: Number,
+    required: true
+  },
   purchaseDate: {
     type: Date,
     default: Date.now

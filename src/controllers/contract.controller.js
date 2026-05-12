@@ -1,4 +1,3 @@
-// backend/src/controllers/contract.controller.js
 const Contract = require('../models/Contract');
 const User = require('../models/user.model');
 const catchAsync = require('../utils/catchAsync');
@@ -7,7 +6,9 @@ const AppError = require('../utils/AppError');
 // ADMIN: Create or Update contract for a role
 exports.createOrUpdateContract = catchAsync(async (req, res, next) => {
   const { role, title, content, terms, requiredFields } = req.body;
-  if (!role || !title || !content) throw new AppError('भूमिका, शीर्षक और सामग्री आवश्यक हैं', 400);
+  if (!role || !title || !content) {
+    return next(new AppError('भूमिका, शीर्षक और सामग्री आवश्यक हैं', 400));
+  }
 
   // Upsert
   const contract = await Contract.findOneAndUpdate(
@@ -27,7 +28,9 @@ exports.getAllContracts = catchAsync(async (req, res, next) => {
 // USER: Get own contract (based on role)
 exports.getMyContract = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user.id);
-  if (!user) throw new AppError('यूज़र नहीं मिला', 404);
+  if (!user) {
+    return next(new AppError('यूज़र नहीं मिला', 404));
+  }
 
   const contract = await Contract.findOne({ role: user.role, isActive: true });
   if (!contract) {
@@ -40,20 +43,23 @@ exports.getMyContract = catchAsync(async (req, res, next) => {
 // USER: Sign / Complete contract
 exports.updateMyContract = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.user.id);
-  if (!user) throw new AppError('यूज़र नहीं मिला', 404);
+  if (!user) {
+    return next(new AppError('यूज़र नहीं मिला', 404));
+  }
 
   if (user.contractStatus === 'completed') {
-    throw new AppError('अनुबंध पहले ही पूरा हो चुका है', 400);
+    return next(new AppError('अनुबंध पहले ही पूरा हो चुका है', 400));
   }
 
   const { processingFee, securityDeposit } = req.body;
 
+  // Save signature if uploaded
   if (req.file) {
     user.signature = `/uploads/signatures/${req.file.filename}`;
   }
 
-  if (processingFee) user.processingFee = processingFee;
-  if (securityDeposit) user.securityDeposit = securityDeposit;
+  if (processingFee !== undefined) user.processingFee = processingFee;
+  if (securityDeposit !== undefined) user.securityDeposit = securityDeposit;
 
   user.contractStatus = 'completed';
   user.contractCompletedAt = new Date();
@@ -76,8 +82,14 @@ exports.updateMyContract = catchAsync(async (req, res, next) => {
 // ADMIN: Review / Approve contract
 exports.reviewContract = catchAsync(async (req, res, next) => {
   const { userId, status, remarks } = req.body;
+  if (!userId || !status) {
+    return next(new AppError('userId और status आवश्यक हैं', 400));
+  }
+
   const user = await User.findById(userId);
-  if (!user) throw new AppError('यूज़र नहीं मिला', 404);
+  if (!user) {
+    return next(new AppError('यूज़र नहीं मिला', 404));
+  }
 
   if (status === 'approved') {
     user.contractStatus = 'completed';
@@ -85,11 +97,16 @@ exports.reviewContract = catchAsync(async (req, res, next) => {
   } else if (status === 'rejected') {
     user.contractStatus = 'draft';
     user.contractRejectionReason = remarks;
+  } else {
+    return next(new AppError('अमान्य स्थिति', 400));
   }
 
   user.contractReviewedBy = req.user.id;
   user.contractReviewedAt = new Date();
   await user.save();
 
-  res.json({ success: true, message: `अनुबंध ${status === 'approved' ? 'स्वीकृत' : 'अस्वीकृत'} हुआ` });
+  res.json({
+    success: true,
+    message: `अनुबंध ${status === 'approved' ? 'स्वीकृत' : 'अस्वीकृत'} हुआ`,
+  });
 });

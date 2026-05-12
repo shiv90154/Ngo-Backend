@@ -1,11 +1,14 @@
-// backend/src/controllers/member.controller.js
 const User = require('../models/user.model');
-const asyncHandler = require('express-async-handler');
-const bcrypt = require('bcrypt');
+const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/AppError');
 
 // ── GET MEMBERS (scoped) ─────────────────────────────
-exports.getMembers = asyncHandler(async (req, res) => {
-  const filter = { ...req.scopeFilter, role: 'USER', isDeleted: false };
+exports.getMembers = catchAsync(async (req, res) => {
+  const filter = {
+    ...req.scopeFilter,
+    role: 'USER',           // सिर्फ़ आम सदस्य
+    isDeleted: false        // सॉफ्ट-डिलीट न दिखाएँ
+  };
 
   const users = await User.find(filter)
     .select('fullName email phone isActive createdAt referralCode')
@@ -26,26 +29,27 @@ exports.getMembers = asyncHandler(async (req, res) => {
 });
 
 // ── ADD MEMBER ───────────────────────────────────────
-exports.addMember = asyncHandler(async (req, res) => {
+exports.addMember = catchAsync(async (req, res, next) => {
   const { fullName, email, phone, password, state, district, block, village } = req.body;
+
   if (!fullName || !email || !phone || !password) {
-    return res.status(400).json({ success: false, message: 'कृपया नाम, ईमेल, फोन और पासवर्ड भरें' });
+    return next(new AppError('कृपया नाम, ईमेल, फोन और पासवर्ड भरें', 400));
   }
 
   const existing = await User.findOne({ $or: [{ email }, { phone }] });
   if (existing) {
-    return res.status(400).json({ success: false, message: 'इस ईमेल या फोन से पहले से सदस्य है' });
+    return next(new AppError('इस ईमेल या फोन से पहले से सदस्य मौजूद है', 400));
   }
 
-  const hashedPassword = await bcrypt.hash(password, 10);
+  // User model pre-save hook automatically hashes password
   const user = await User.create({
     fullName,
     email,
     phone,
-    password: hashedPassword,
+    password,                     // बिना मैन्युअल हैश के – मॉडल कर लेगा
     role: 'USER',
     isActive: true,
-    isVerified: true,
+    isVerified: true,             // ऑर्गनाइज़ेशन द्वारा जोड़ा गया, सीधे वेरिफाइड
     state: state || req.user.state,
     district: district || req.user.district,
     block: block || req.user.block,
@@ -68,23 +72,33 @@ exports.addMember = asyncHandler(async (req, res) => {
 });
 
 // ── BLOCK / UNBLOCK ──────────────────────────────────
-exports.blockMember = asyncHandler(async (req, res) => {
-  const user = await User.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
-  if (!user) return res.status(404).json({ success: false, message: 'Member not found' });
+exports.blockMember = catchAsync(async (req, res, next) => {
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    { isActive: false, updatedBy: req.user._id },
+    { new: true, runValidators: true }
+  );
+  if (!user) return next(new AppError('Member not found', 404));
   res.json({ success: true, message: 'Member blocked' });
 });
 
-exports.unblockMember = asyncHandler(async (req, res) => {
-  const user = await User.findByIdAndUpdate(req.params.id, { isActive: true }, { new: true });
-  if (!user) return res.status(404).json({ success: false, message: 'Member not found' });
+exports.unblockMember = catchAsync(async (req, res, next) => {
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    { isActive: true, updatedBy: req.user._id },
+    { new: true, runValidators: true }
+  );
+  if (!user) return next(new AppError('Member not found', 404));
   res.json({ success: true, message: 'Member unblocked' });
 });
 
-// ── ID CARD & CERTIFICATE (dummy) ────────────────────
-exports.getMemberIdCard = asyncHandler(async (req, res) => {
+// ── ID CARD & CERTIFICATE (placeholder) ──────────────
+exports.getMemberIdCard = catchAsync(async (req, res) => {
+  // TODO: Generate actual ID card PDF
   res.json({ success: true, idCardUrl: '/id-cards/sample.pdf' });
 });
 
-exports.getMemberCertificate = asyncHandler(async (req, res) => {
+exports.getMemberCertificate = catchAsync(async (req, res) => {
+  // TODO: Generate certificate
   res.json({ success: true, certificateUrl: '/certificates/sample.pdf' });
 });
