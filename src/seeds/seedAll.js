@@ -7,7 +7,7 @@ const LicenseType = require('../models/LicenseType');
 const EducationProgram = require('../models/EducationProgram');
 const CommissionSplit = require('../models/CommissionSplit');
 
-const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://iph08_db_user:ZV88UXdyZDuQ8Xgc@cluster0.wssqmpk.mongodb.net/';
+
 
 async function seed() {
   try {
