@@ -11,7 +11,7 @@ const courseSchema = new mongoose.Schema({
   language: { type: String, default: 'English' },
   isPublished: { type: Boolean, default: false },
   totalEnrolled: { type: Number, default: 0 },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
 });
 courseSchema.index({ instructor: 1 });
 courseSchema.index({ category: 1 });

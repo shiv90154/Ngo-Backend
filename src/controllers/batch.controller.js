@@ -276,31 +276,64 @@ exports.getMyBatches = catchAsync(async (req, res, next) => {
 
 exports.getBatchDetails = catchAsync(async (req, res, next) => {
     const { batchId } = req.params;
-    const studentId = req.user.id;
 
-    const batch = await Batch.findById(batchId)
-        .populate("instructor", "fullName email profileImage bio")
-        .populate("course", "title description thumbnail")
-        .populate("enrolledStudents", "fullName email profileImage");
+    // Build query - don't require instructor filter for public view
+    let query = Batch.findById(batchId);
 
-    if (!batch) {
-        throw new AppError("बैच नहीं मिला", 404);
+    // If user is authenticated and is instructor/admin, populate additional fields
+    if (req.user) {
+        query = query.populate('instructor', 'name email profileImage');
+    } else {
+        query = query.populate('instructor', 'name');
     }
 
-    const enrollment = await BatchEnrollment.findOne({
-        batch: batchId,
-        student: studentId,
-    });
+    const batch = await query
+        .populate('course', 'title description thumbnail')
+        .select('-__v');
+
+    if (!batch) {
+        throw new AppError("Batch not found", 404);
+    }
+
+    // If batch is not published, only authenticated instructors/admins can view
+    if (!batch.isPublished) {
+        if (!req.user || (req.user.id !== batch.instructor?._id?.toString() && req.user.role !== 'admin')) {
+            throw new AppError("Batch not found", 404);
+        }
+    }
+
+    // Get enrolled students count (only if authenticated)
+    let enrolledCount = 0;
+    let isEnrolled = false;
+    let isWaitlisted = false;
+
+    if (req.user && req.user.role === 'student') {
+        const enrollment = await Enrollment.findOne({
+            batchId: batch._id,
+            studentId: req.user.id
+        });
+
+        if (enrollment) {
+            isEnrolled = enrollment.status === 'active';
+            isWaitlisted = enrollment.status === 'waitlisted';
+        }
+
+        enrolledCount = await Enrollment.countDocuments({
+            batchId: batch._id,
+            status: 'active'
+        });
+    }
 
     res.json({
         success: true,
-        batch,
-        isEnrolled: enrollment?.status === "enrolled",
-        isWaitlisted: enrollment?.status === "waitlisted",
-        enrollment,
+        batch: {
+            ...batch.toObject(),
+            enrolledCount,
+            isEnrolled,
+            isWaitlisted
+        },
     });
 });
-
 // ====================== INSTRUCTOR CONTROLLERS ======================
 
 exports.getInstructorBatches = catchAsync(async (req, res, next) => {
@@ -420,7 +453,26 @@ exports.deleteBatch = catchAsync(async (req, res, next) => {
         message: "बैच हटा दिया गया",
     });
 });
+exports.getBatchDetails = catchAsync(async (req, res, next) => {
+    const { batchId } = req.params;
 
+    const batch = await Batch.findOne({
+        _id: batchId,
+        instructor: req.user.id
+    }).populate('course', 'title description'); // Populate course details if needed
+
+    if (!batch) {
+        throw new AppError(
+            "बैच नहीं मिला या आपके पास देखने की अनुमति नहीं है",
+            404
+        );
+    }
+
+    res.json({
+        success: true,
+        batch,
+    });
+});
 exports.getBatchStudents = catchAsync(async (req, res, next) => {
     const { batchId } = req.params;
     const { page = 1, limit = 20, status = "enrolled" } = req.query;
