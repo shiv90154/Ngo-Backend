@@ -69,5 +69,6 @@ router.patch('/meetings/:id/status', adminController.updateMeetingStatus);
 
 // ---------- WEEKLY CONTRIBUTIONS ----------
 router.get('/contributions/all', adminController.getAllContributions);
-
+router.post('/commission-splits', adminController.createCommissionSplit);
+router.delete('/commission-splits/:id', adminController.deleteCommissionSplit);
 module.exports = router;

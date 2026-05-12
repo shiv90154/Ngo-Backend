@@ -1,3 +1,4 @@
+// backend/src/controllers/finance.controller.js
 const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
@@ -23,12 +24,19 @@ exports.createWalletOrder = catchAsync(async (req, res, next) => {
   if (!amount || amount < 10) {
     return next(new AppError('न्यूनतम राशि ₹10 है', 400));
   }
+
+  // ✅ छोटा और यूनिक रिसीट — हमेशा 40 कैरेक्टर से कम
+  const shortId = req.user.id.toString().slice(-6);
+  const timestamp = Date.now().toString(36);   // बेस36 से कम कैरेक्टर
+  const receipt = `w_${shortId}_${timestamp}`.slice(0, 40);
+
   const order = await razorpay.orders.create({
     amount: amount * 100,
     currency: 'INR',
-    receipt: `wallet_${req.user.id}_${Date.now()}`,
+    receipt,
     notes: { userId: req.user.id, type: 'wallet_topup' }
   });
+
   res.json({
     success: true,
     data: {
@@ -42,6 +50,8 @@ exports.createWalletOrder = catchAsync(async (req, res, next) => {
 // ── 2. VERIFY PAYMENT SIGNATURE ──
 exports.verifyPayment = catchAsync(async (req, res, next) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+  
+  // 1. Verify signature
   const generatedSignature = crypto
     .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
     .update(razorpay_order_id + '|' + razorpay_payment_id)
@@ -49,14 +59,65 @@ exports.verifyPayment = catchAsync(async (req, res, next) => {
   if (generatedSignature !== razorpay_signature) {
     return next(new AppError('अमान्य भुगतान हस्ताक्षर', 400));
   }
-  res.json({ success: true, message: 'Payment verified successfully' });
+
+  try {
+    // 2. Fetch the Razorpay order to get amount and notes
+    const order = await razorpay.orders.fetch(razorpay_order_id);
+    const amount = order.amount / 100;  // convert paise to INR
+    const userId = order.notes?.userId;
+
+    if (!userId) {
+      return next(new AppError('Order notes में userId नहीं है', 400));
+    }
+
+    // 3. Credit wallet (same as webhook does, but now from verify endpoint)
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const user = await User.findById(userId).session(session);
+      if (!user) {
+        await session.abortTransaction();
+        return next(new AppError('यूज़र नहीं मिला', 404));
+      }
+
+      user.walletBalance += amount;
+      user.totalEarnings += amount;
+      await user.save({ session });
+
+      await Transaction.create([{
+        user: userId,
+        type: 'credit',
+        amount,
+        description: `Wallet top‑up via Razorpay (${razorpay_payment_id})`,
+        referenceId: razorpay_payment_id,
+        status: 'completed'
+      }], { session });
+
+      // Optional: Trigger MLM commission (if applicable)
+      await calculateCommission(userId, amount, 'wallet_topup', razorpay_payment_id);
+
+      await session.commitTransaction();
+    } catch (err) {
+      await session.abortTransaction();
+      console.error('Transaction error:', err);
+      return next(new AppError('वॉलेट अपडेट करने में त्रुटि', 500));
+    } finally {
+      session.endSession();
+    }
+
+    res.json({ success: true, message: 'Payment verified and wallet credited' });
+  } catch (error) {
+    console.error('Verify error:', error);
+    return next(new AppError('Payment verification processing failed', 500));
+  }
 });
 
 // ── 3. RAZORPAY WEBHOOK (सुरक्षित बॉडी पार्सिंग) ──
 exports.razorpayWebhook = catchAsync(async (req, res, next) => {
   const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
   const signature = req.headers['x-razorpay-signature'];
-  const body = JSON.stringify(req.body);   // ✅ स्ट्रिंग बनाओ
+  const body = JSON.stringify(req.body);
   const expectedSignature = crypto
     .createHmac('sha256', secret)
     .update(body)
@@ -66,7 +127,7 @@ exports.razorpayWebhook = catchAsync(async (req, res, next) => {
     return res.status(400).send('Invalid signature');
   }
 
-  const event = req.body;   // पहले से ऑब्जेक्ट है
+  const event = req.body;
   if (event.event === 'payment.captured') {
     const payment = event.payload.payment.entity;
     const userId = payment.notes?.userId;

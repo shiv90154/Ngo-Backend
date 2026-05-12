@@ -30,7 +30,8 @@ const contributionRoutes = require('./contribution.routes');
 const newsRoutes = require('./news.routes');
 const internshipRoutes = require('./internship.routes');
 const productSaleRoutes = require('./productSale.routes');
-const contractRoutes = require('./contract.routes');             // 🆕 Contracts
+const contractRoutes = require('./contract.routes');
+const meetingRoutes = require('./meeting.routes');                // 🆕 Meetings
 const searchController = require('../controllers/search.controller');
 
 // ---------- Health Check ----------
@@ -66,7 +67,8 @@ router.use('/events', eventRoutes);
 router.use('/expenses', expenseRoutes);
 router.use('/contributions', contributionRoutes);
 router.use('/products', productSaleRoutes);
-router.use('/contracts', contractRoutes);                         
+router.use('/contracts', contractRoutes);
+router.use('/meetings', meetingRoutes);                           // 🆕 Meetings
 router.get('/search', searchController.globalSearch);
 
 module.exports = router;

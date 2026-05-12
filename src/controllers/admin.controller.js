@@ -438,3 +438,25 @@ exports.getAllContributions = catchAsync(async (req, res) => {
   const total = await WeeklyContribution.countDocuments();
   res.json({ success: true, contributions, totalPages: Math.ceil(total / limit), currentPage: parseInt(page), total });
 });
+
+
+// ======================
+// COMMISSION SPLITS – CREATE
+// ======================
+exports.createCommissionSplit = catchAsync(async (req, res, next) => {
+  const { roleName, percentage, levelOffset } = req.body;
+  if (!roleName || percentage === undefined || levelOffset === undefined) {
+    return next(new AppError('भूमिका, प्रतिशत और लेवल ऑफसेट आवश्यक हैं', 400));
+  }
+  const split = await CommissionSplit.create({ roleName, percentage, levelOffset });
+  res.status(201).json({ success: true, split });
+});
+
+// ======================
+// COMMISSION SPLITS – DELETE
+// ======================
+exports.deleteCommissionSplit = catchAsync(async (req, res, next) => {
+  const split = await CommissionSplit.findByIdAndDelete(req.params.id);
+  if (!split) return next(new AppError('Split not found', 404));
+  res.json({ success: true, message: 'Split deleted' });
+});

@@ -1,5 +1,21 @@
 const mongoose = require('mongoose');
 
+const messageSchema = new mongoose.Schema({
+  sender: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  text: {
+    type: String,
+    required: true
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
 const meetingSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -27,6 +43,8 @@ const meetingSchema = new mongoose.Schema({
     enum: ['scheduled', 'live', 'ended', 'cancelled'],
     default: 'scheduled'
   },
+  // 🆕 Chat messages
+  messages: [messageSchema],
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
