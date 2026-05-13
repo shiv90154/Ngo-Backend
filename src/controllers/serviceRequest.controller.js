@@ -3,7 +3,7 @@ const ServiceRequest = require('../models/ServiceRequest');
 const path = require('path');
 const fs = require('fs').promises;
 
-const uploadDir = path.join(__dirname, '../uploads/service-requests');
+const uploadDir = path.join(__dirname, '../../Server/src/uploads/service-requests');
 (async () => { await fs.mkdir(uploadDir, { recursive: true }); })();
 
 // ---------- CREATE (updated to include new fields) ----------
@@ -43,7 +43,7 @@ exports.createRequest = async (req, res) => {
     res.status(201).json({ success: true, serviceRequest });
   } catch (error) {
     if (req.files) {
-      for (const file of req.files) await fs.unlink(file.path).catch(() => {});
+      for (const file of req.files) await fs.unlink(file.path).catch(() => { });
     }
     res.status(500).json({ success: false, error: error.message });
   }
@@ -118,8 +118,8 @@ exports.getRequestById = async (req, res) => {
     if (!request) return res.status(404).json({ success: false, message: 'Request not found' });
 
     if (req.user.id !== request.user._id.toString() &&
-        !req.user.role.includes('ADMIN') &&
-        req.user.role !== 'SUPER_ADMIN') {
+      !req.user.role.includes('ADMIN') &&
+      req.user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     res.json({ success: true, request });
@@ -182,8 +182,8 @@ exports.deleteRequest = async (req, res) => {
 
     // Only the owner or an admin can delete
     if (req.user.id !== request.user.toString() &&
-        req.user.role !== 'SUPER_ADMIN' &&
-        req.user.role !== 'ADDITIONAL_DIRECTOR') {
+      req.user.role !== 'SUPER_ADMIN' &&
+      req.user.role !== 'ADDITIONAL_DIRECTOR') {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
@@ -191,7 +191,7 @@ exports.deleteRequest = async (req, res) => {
     if (request.attachments && request.attachments.length > 0) {
       for (const att of request.attachments) {
         const filePath = path.join(__dirname, '..', att.fileUrl);
-        await fs.unlink(filePath).catch(() => {});
+        await fs.unlink(filePath).catch(() => { });
       }
     }
 

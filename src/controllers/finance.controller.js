@@ -7,8 +7,8 @@ const Transaction = require('../models/Transaction.model');
 const Loan = require('../models/Loan.model');
 const BillPayment = require('../models/BillPayment.model');
 const AepsRequest = require('../models/AepsRequest.model');
-const { calculateCommission } = require('../services/mlmEngine');  
-const mailer = require('../utils/sendEmail'); 
+const { calculateCommission } = require('../services/mlmEngine');
+const mailer = require('../utils/sendEmail');
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
