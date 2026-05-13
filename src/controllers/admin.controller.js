@@ -65,7 +65,7 @@ exports.getStats = catchAsync(async (req, res) => {
 
 // ---------- USER MANAGEMENT ----------
 exports.createUser = catchAsync(async (req, res, next) => {
-  const { fullName, email, phone, password, role, modules, state, district, block, village, isActive } = req.body;
+  const { fullName, email, phone, password, role, modules, state, district, block, village, isActive, sponsorReferral } = req.body;
   if (!fullName || !email || !phone || !password) {
     return next(new AppError('Full name, email, phone, and password are required', 400));
   }
@@ -76,6 +76,18 @@ exports.createUser = catchAsync(async (req, res, next) => {
   if (existing) {
     return next(new AppError('User with this email or phone already exists', 400));
   }
+
+  // 🆕 Resolve sponsor from referral code (if provided)
+  let sponsorId = null;
+  if (sponsorReferral) {
+    const sponsor = await User.findOne({ referralCode: sponsorReferral });
+    if (sponsor) {
+      sponsorId = sponsor._id;
+    } else {
+      return next(new AppError('Invalid sponsor referral code', 400));
+    }
+  }
+
   const user = await User.create({
     fullName, email, phone, password,
     role: role || 'USER',
@@ -84,7 +96,25 @@ exports.createUser = catchAsync(async (req, res, next) => {
     isActive: isActive !== undefined ? isActive : true,
     isVerified: true,
     createdBy: req.user.id,
+    sponsorId,              // ✅ अब स्पॉन्सर सेट होगा
+    sponsorReferral,        // रेफ़रल कोड भी सेव करें
   });
+
+  // 🆕 अगर स्पॉन्सर मिला तो उसकी टीम साइज़ और बाइनरी अपडेट करें
+  if (sponsorId) {
+    const sponsor = await User.findById(sponsorId);
+    if (sponsor) {
+      sponsor.teamSize = (sponsor.teamSize || 0) + 1;
+      if (!sponsor.leftChild) {
+        sponsor.leftChild = user._id;
+      } else if (!sponsor.rightChild) {
+        sponsor.rightChild = user._id;
+      }
+      await sponsor.save();
+    }
+  }
+
+
   const userData = user.toObject();
   delete userData.password;
   delete userData.otp;
@@ -127,7 +157,7 @@ exports.getUser = catchAsync(async (req, res, next) => {
 exports.updateUser = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.params.id);
   if (!user) return next(new AppError('User not found', 404));
-  const allowedFields = ['role', 'modules', 'isActive', 'reportsTo', 'sponsorId', 'hierarchyLevel', 'incentivePayoutInfo'];
+ const allowedFields = ['role', 'modules', 'isActive', 'reportsTo', 'sponsorId', 'hierarchyLevel', 'incentivePayoutInfo', 'password'];
   allowedFields.forEach(field => {
     if (req.body[field] !== undefined) user[field] = req.body[field];
   });

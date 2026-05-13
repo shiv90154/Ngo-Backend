@@ -1,30 +1,41 @@
 const MemberCertificate = require('../models/MemberCertificate');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
+const { generateCertificate } = require('../services/certificateGenerator');
 
-// @desc   Generate a new certificate
+// @desc   Generate a new certificate (PDF)
 // @route  POST /api/member-certificates/generate
 exports.generateCertificate = catchAsync(async (req, res, next) => {
   const { memberName, certificateType, customMessage } = req.body;
 
   if (!memberName || !certificateType) {
-    return next(new AppError('सदस्य का नाम और प्रमाणपत्र प्रकार आवश्यक है', 400));
+    return next(new AppError('Member name and certificate type are required', 400));
   }
 
-  // Generate a unique verification code
-  const verificationCode = Math.random().toString(36).substring(2, 10).toUpperCase();
-
-  const certificate = await MemberCertificate.create({
-    memberName,
+  // Generate PDF
+  const result = await generateCertificate({
+    recipientName: memberName,
     certificateType,
-    customMessage,
-    verificationCode,
-    issuedBy: req.user.id,
-    state: req.user.state,
-    district: req.user.district,
-    block: req.user.block,
-    village: req.user.village,
+    issueDate: new Date(),
+    customMessage: customMessage || '',
   });
+
+  // Save to DB with PDF URL
+const certificate = await MemberCertificate.create({
+  memberName,
+  certificateType,
+  customMessage: customMessage || '',
+
+  verificationCode: result.verificationCode,
+
+  issuedBy: req.user.id,
+  state: req.user.state,
+  district: req.user.district,
+  block: req.user.block,
+  village: req.user.village,
+
+  certificateUrl: result.certificateUrl,
+});
 
   res.status(201).json({ success: true, certificate });
 });
