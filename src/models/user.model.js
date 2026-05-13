@@ -202,16 +202,10 @@ const userSchema = new mongoose.Schema(
     },
     patients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     appointments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Appointment' }],
-    healthRecords: [
-      {
-        recordType: { type: String, enum: ['lab_report', 'diagnosis', 'vaccination', 'surgery'] },
-        title: String,
-        description: String,
-        fileUrl: String,
-        date: Date,
-        doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      },
-    ],
+    healthRecords: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'HealthRecord'
+    }],
     prescriptions: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Prescription' }],
 
     // ========== AGRICULTURE MODULE ==========

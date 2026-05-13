@@ -1,4 +1,4 @@
-// backend/src/controllers/finance.controller.js
+
 const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
