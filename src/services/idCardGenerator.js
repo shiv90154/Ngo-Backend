@@ -374,6 +374,7 @@ body{
 
     return {
         idCardUrl: `/uploads/idcards/${fileName}`,
+        filePath,
         cardCode,
     };
 };

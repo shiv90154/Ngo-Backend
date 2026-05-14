@@ -539,6 +539,7 @@ const generateCertificate = async ({
 
   return {
     certificateUrl: `/uploads/certificates/${fileName}`,
+    filePath,
     verificationCode,
   };
 };
