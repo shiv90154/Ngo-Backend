@@ -1,8 +1,8 @@
 // backend/src/controllers/mlm.controller.js
 const User = require('../models/user.model');
-const CommissionTransaction = require('../models/CommissionTransaction');
-const CommissionLog = require('../models/CommissionLog');
-const { processPayout } = require('../services/mlmEngine');
+// const CommissionTransaction = require('../models/CommissionTransaction');
+// const CommissionLog = require('../models/CommissionLog');
+// const { processPayout } = require('../services/mlmEngine');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 

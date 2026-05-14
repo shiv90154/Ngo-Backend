@@ -5,7 +5,7 @@ const Event = require('../models/Event');
 const Expense = require('../models/Expense');
 const User = require('../models/user.model');
 const LicensePurchase = require('../models/LicensePurchase');
-const CommissionTransaction = require('../models/CommissionTransaction');
+// const CommissionTransaction = require('../models/CommissionTransaction');
 
 // @desc   Get dashboard stats (scoped)
 exports.getDashboardStats = async (req, res) => {

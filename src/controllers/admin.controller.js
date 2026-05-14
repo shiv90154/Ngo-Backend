@@ -2,11 +2,12 @@
 const User = require('../models/user.model');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
-
+const { distributeMonthlyPI } = require('../services/piEngine');
+const PIShare = require('../models/PIShare');
 // Models that are essential
 const LicenseType = require('../models/LicenseType');
 const LicensePurchase = require('../models/LicensePurchase');
-const CommissionSplit = require('../models/CommissionSplit');
+// const CommissionSplit = require('../models/CommissionSplit');
 const EducationProgram = require('../models/EducationProgram');
 
 const Donation = require('../models/Donation');
@@ -611,5 +612,92 @@ exports.getAllPayments = catchAsync(async (req, res) => {
     total,
     totalPages,
     currentPage: pageNum,
+  });
+});
+exports.triggerPIDistribution = catchAsync(async (req, res, next) => {
+  const result = await distributeMonthlyPI();
+  res.json({
+    success: true,
+    message: 'PI Distribution completed successfully',
+    data: result,
+  });
+});
+
+// PI Shares Management
+exports.getPIShares = catchAsync(async (req, res) => {
+  const shares = await PIShare.find().sort('role');
+  res.json({ success: true, shares });
+});
+
+exports.createPIShare = catchAsync(async (req, res, next) => {
+  const { role, percentage } = req.body;
+  if (!role || percentage === undefined) {
+    return next(new AppError('Role and percentage are required', 400));
+  }
+
+  const existing = await PIShare.findOne({ role });
+  if (existing) {
+    return next(new AppError('PI Share for this role already exists', 400));
+  }
+
+  const share = await PIShare.create({ role, percentage });
+  res.status(201).json({ success: true, share });
+});
+
+exports.updatePIShare = catchAsync(async (req, res, next) => {
+  const { percentage } = req.body;
+  if (percentage === undefined) {
+    return next(new AppError('Percentage is required', 400));
+  }
+
+  const share = await PIShare.findByIdAndUpdate(
+    req.params.id,
+    { percentage },
+    { new: true, runValidators: true }
+  );
+
+  if (!share) return next(new AppError('PI Share not found', 404));
+  res.json({ success: true, share });
+});
+
+exports.deletePIShare = catchAsync(async (req, res, next) => {
+  const share = await PIShare.findByIdAndDelete(req.params.id);
+  if (!share) return next(new AppError('PI Share not found', 404));
+  res.json({ success: true, message: 'PI Share deleted' });
+});
+
+
+exports.getPITransactions = catchAsync(async (req, res) => {
+  const { page = 1, limit = 20, search } = req.query;
+
+  const query = {
+    description: { $regex: 'PI Distribution', $options: 'i' },
+    type: 'credit',
+    status: 'completed',
+  };
+
+  if (search) {
+    // First find matching users
+    const users = await User.find({
+      fullName: { $regex: search, $options: 'i' }
+    }).select('_id');
+    query.user = { $in: users.map(u => u._id) };
+  }
+
+  const transactions = await Transaction.find(query)
+    .populate('user', 'fullName email role')
+    .sort('-createdAt')
+    .limit(parseInt(limit))
+    .skip((parseInt(page) - 1) * parseInt(limit))
+    .lean();
+
+  const total = await Transaction.countDocuments(query);
+
+  res.json({
+    success: true,
+    transactions,
+    total,
+    totalPages: Math.ceil(total / parseInt(limit)),
+    currentPage: parseInt(page),
   });
 });
