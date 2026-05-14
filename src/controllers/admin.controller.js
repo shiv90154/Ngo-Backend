@@ -8,6 +8,8 @@ const LicenseType = require('../models/LicenseType');
 const LicensePurchase = require('../models/LicensePurchase');
 const CommissionSplit = require('../models/CommissionSplit');
 const EducationProgram = require('../models/EducationProgram');
+
+const Donation = require('../models/Donation');
 const ProductSale = require('../models/ProductSale');
 
 // Additional models (now created as skeletons)
@@ -491,4 +493,123 @@ exports.getAllContributions = catchAsync(async (req, res) => {
     .skip((page - 1) * limit);
   const total = await WeeklyContribution.countDocuments();
   res.json({ success: true, contributions, totalPages: Math.ceil(total / limit), currentPage: parseInt(page), total });
+});
+
+exports.getAllPayments = catchAsync(async (req, res) => {
+  const { page = 1, limit = 20, type, search } = req.query;
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
+
+  // Prepare individual queries
+  let donationQuery = {};
+  let saleQuery = {};
+  let licenseQuery = {};
+  let walletQuery = {};
+
+  if (type === 'donation') {
+    donationQuery = {};
+    saleQuery = { _id: null };   // exclude
+    licenseQuery = { _id: null };
+    walletQuery = { _id: null };
+  } else if (type === 'product_sale') {
+    donationQuery = { _id: null };
+    saleQuery = {};
+    licenseQuery = {};
+    walletQuery = { _id: null };
+  } else if (type === 'wallet_topup') {
+    donationQuery = { _id: null };
+    saleQuery = { _id: null };
+    licenseQuery = { _id: null };
+    walletQuery = {};
+  }
+
+  if (search) {
+    const regex = new RegExp(search, 'i');
+    donationQuery = { ...donationQuery, $or: [{ donorName: regex }, { email: regex }] };
+    saleQuery = { ...saleQuery, $or: [{ customerName: regex }] };
+    licenseQuery = { ...licenseQuery, $or: [{ customerName: regex }] };
+    walletQuery = { ...walletQuery, $or: [{ description: regex }] };
+  }
+
+  const [
+    donations,
+    productSales,
+    licensePurchases,
+    walletTransactions,
+    donationCount,
+    saleCount,
+    licenseCount,
+    walletCount
+  ] = await Promise.all([
+    Donation.find(donationQuery).select('donorName email amount type createdAt').lean(),
+    ProductSale.find(saleQuery).select('customerName amount productType purchaseDate').lean(),
+    LicensePurchase.find(licenseQuery).select('customerName amount purchaseDate').lean(),
+    Transaction.find(walletQuery).select('user amount description type createdAt').populate('user', 'fullName email').lean(),
+    Donation.countDocuments(donationQuery),
+    ProductSale.countDocuments(saleQuery),
+    LicensePurchase.countDocuments(licenseQuery),
+    Transaction.countDocuments(walletQuery)
+  ]);
+
+  // Map to unified format
+  const unifiedDonations = donations.map(d => ({
+    _id: d._id,
+    type: 'donation',
+    customer: d.donorName,
+    email: d.email,
+    amount: d.amount,
+    method: d.type,
+    date: d.createdAt,
+    description: 'Donation',
+  }));
+
+  const unifiedSales = productSales.map(s => ({
+    _id: s._id,
+    type: 'product_sale',
+    customer: s.customerName,
+    email: '',
+    amount: s.amount,
+    method: 'online',
+    date: s.purchaseDate,
+    description: s.productType === 'license' ? 'License Purchase' : 'Education Program',
+  }));
+
+  const unifiedLicenses = licensePurchases.map(l => ({
+    _id: l._id,
+    type: 'license_purchase',
+    customer: l.customerName,
+    email: '',
+    amount: l.amount,
+    method: 'online',
+    date: l.purchaseDate,
+    description: 'License Purchase',
+  }));
+
+  const unifiedWallet = walletTransactions.map(t => ({
+    _id: t._id,
+    type: 'wallet_topup',
+    customer: t.user?.fullName || 'Unknown',
+    email: t.user?.email || '',
+    amount: t.amount,
+    method: t.type === 'credit' ? 'online' : 'debit',
+    date: t.createdAt,
+    description: t.description || 'Wallet Top-up',
+  }));
+
+  let allPayments = [...unifiedDonations, ...unifiedSales, ...unifiedLicenses, ...unifiedWallet];
+
+  // Sort by date descending
+  allPayments.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const total = allPayments.length;
+  const totalPages = Math.ceil(total / limitNum);
+  const paginatedPayments = allPayments.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+
+  res.json({
+    success: true,
+    payments: paginatedPayments,
+    total,
+    totalPages,
+    currentPage: pageNum,
+  });
 });

@@ -19,5 +19,15 @@ router.post('/verify', protect, donationController.verifyDonationPayment); // ve
 // ── NGO / Admin ──
 router.get('/all', protect, restrictTo(...ALLOWED), donationController.getAllDonations);
 router.post('/custom', protect, restrictTo(...ALLOWED), donationController.createCustomDonation);
-
+router.get('/receipt/:id', protect, async (req, res) => {
+  const donation = await Donation.findById(req.params.id);
+  if (!donation || !donation.receiptUrl) {
+    return res.status(404).json({ success: false, message: 'Receipt not found' });
+  }
+  const filePath = path.join(__dirname, '../', donation.receiptUrl);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ success: false, message: 'File not found' });
+  }
+  res.download(filePath, `donation_receipt.pdf`);
+});
 module.exports = router;

@@ -71,4 +71,6 @@ router.patch('/meetings/:id/status', adminController.updateMeetingStatus);
 router.get('/contributions/all', adminController.getAllContributions);
 router.post('/commission-splits', adminController.createCommissionSplit);
 router.delete('/commission-splits/:id', adminController.deleteCommissionSplit);
+
+router.get('/payments', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adminController.getAllPayments);
 module.exports = router;
