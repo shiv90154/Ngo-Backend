@@ -247,7 +247,7 @@ exports.register = async (req, res) => {
     if (req.files) {
       for (const field in req.files) {
         for (const file of req.files[field]) {
-          await fs.unlink(file.path).catch(() => {});
+          await fs.unlink(file.path).catch(() => { });
         }
       }
     }
@@ -274,7 +274,7 @@ exports.verifyOTP = async (req, res) => {
     user.otpExpire = null;
     await user.save();
 
-    try { await sendEmail.sendWelcome(user.email, user.fullName); } catch (e) {}
+    try { await sendEmail.sendWelcome(user.email, user.fullName); } catch (e) { }
 
     const token = jwt.sign(
       { id: user._id, role: user.role, modules: user.modules },
@@ -394,7 +394,7 @@ exports.resetPassword = async (req, res) => {
     user.otpExpire = undefined;
     await user.save();
 
-    try { await sendEmail.sendPasswordReset(user.email, user.fullName); } catch (e) {}
+    try { await sendEmail.sendPasswordReset(user.email, user.fullName); } catch (e) { }
 
     res.json({ success: true, message: 'Password reset successfully' });
   } catch (error) {
@@ -428,7 +428,7 @@ exports.updateProfile = async (req, res) => {
       if (!file) return null;
       if (user[fieldName]) {
         const oldPath = path.join(__dirname, '../', user[fieldName]);
-        await fs.unlink(oldPath).catch(() => {});
+        await fs.unlink(oldPath).catch(() => { });
       }
       const ext = path.extname(file.originalname);
       const fileName = `${Date.now()}_${prefix}_${Math.random().toString(36).substring(2)}${ext}`;
@@ -581,7 +581,7 @@ exports.updateProfile = async (req, res) => {
     if (req.files) {
       for (const field in req.files) {
         for (const file of req.files[field]) {
-          await fs.unlink(file.path).catch(() => {});
+          await fs.unlink(file.path).catch(() => { });
         }
       }
     }
@@ -665,7 +665,7 @@ exports.deleteUser = async (req, res) => {
     if (hardDelete === 'true') {
       if (user.profileImage) {
         const fp = path.join(__dirname, '../', user.profileImage);
-        await fs.unlink(fp).catch(() => {});
+        await fs.unlink(fp).catch(() => { });
       }
       await User.findByIdAndDelete(req.params.id);
       res.json({ success: true, message: 'User permanently deleted' });
@@ -797,7 +797,7 @@ exports.addHealthRecord = async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'Health record added' });
   } catch (error) {
-    if (req.file) await fs.unlink(req.file.path).catch(() => {});
+    if (req.file) await fs.unlink(req.file.path).catch(() => { });
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -821,7 +821,7 @@ exports.addProductListing = async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'Product added' });
   } catch (error) {
-    if (req.file) await fs.unlink(req.file.path).catch(() => {});
+    if (req.file) await fs.unlink(req.file.path).catch(() => { });
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -849,7 +849,7 @@ exports.addLoan = async (req, res) => {
     const userId = req.params.userId || req.user.id;
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    user.loans.push({ amount: parseFloat(amount), emiAmount: parseFloat(emiAmount), tenureMonths: parseInt(tenureMonths), outstanding: parseFloat(amount), nextDueDate: new Date(Date.now() + 30*24*60*60*1000), status: 'active', sanctionedAt: new Date() });
+    user.loans.push({ amount: parseFloat(amount), emiAmount: parseFloat(emiAmount), tenureMonths: parseInt(tenureMonths), outstanding: parseFloat(amount), nextDueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), status: 'active', sanctionedAt: new Date() });
     await user.save();
     res.json({ success: true, message: 'Loan added' });
   } catch (error) {
@@ -906,7 +906,7 @@ exports.addStoreProduct = async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'Store product added' });
   } catch (error) {
-    if (req.file) await fs.unlink(req.file.path).catch(() => {});
+    if (req.file) await fs.unlink(req.file.path).catch(() => { });
     res.status(500).json({ success: false, error: error.message });
   }
 };
