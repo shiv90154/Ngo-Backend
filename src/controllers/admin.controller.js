@@ -1,3 +1,4 @@
+// backend/src/controllers/admin.controller.js
 const User = require('../models/user.model');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
@@ -96,11 +97,10 @@ exports.createUser = catchAsync(async (req, res, next) => {
     isActive: isActive !== undefined ? isActive : true,
     isVerified: true,
     createdBy: req.user.id,
-    sponsorId,              // ✅ अब स्पॉन्सर सेट होगा
-    sponsorReferral,        // रेफ़रल कोड भी सेव करें
+    sponsorId,
+    sponsorReferral,
   });
 
-  // 🆕 अगर स्पॉन्सर मिला तो उसकी टीम साइज़ और बाइनरी अपडेट करें
   if (sponsorId) {
     const sponsor = await User.findById(sponsorId);
     if (sponsor) {
@@ -113,7 +113,6 @@ exports.createUser = catchAsync(async (req, res, next) => {
       await sponsor.save();
     }
   }
-
 
   const userData = user.toObject();
   delete userData.password;
@@ -157,7 +156,7 @@ exports.getUser = catchAsync(async (req, res, next) => {
 exports.updateUser = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.params.id);
   if (!user) return next(new AppError('User not found', 404));
- const allowedFields = ['role', 'modules', 'isActive', 'reportsTo', 'sponsorId', 'hierarchyLevel', 'incentivePayoutInfo', 'password'];
+  const allowedFields = ['role', 'modules', 'isActive', 'reportsTo', 'sponsorId', 'hierarchyLevel', 'incentivePayoutInfo', 'password'];
   allowedFields.forEach(field => {
     if (req.body[field] !== undefined) user[field] = req.body[field];
   });
@@ -389,13 +388,38 @@ exports.getCommissionSplits = catchAsync(async (req, res) => {
 });
 
 exports.updateCommissionSplit = catchAsync(async (req, res, next) => {
-  const { percentage } = req.body;
-  if (percentage === undefined) {
-    return next(new AppError('Percentage is required', 400));
+  const { percentage, productType } = req.body;
+  const updateData = {};
+  if (percentage !== undefined) updateData.percentage = percentage;
+  if (productType !== undefined) updateData.productType = productType;
+  
+  if (Object.keys(updateData).length === 0) {
+    return next(new AppError('No fields to update', 400));
   }
-  const split = await CommissionSplit.findByIdAndUpdate(req.params.id, { percentage }, { new: true });
+  
+  const split = await CommissionSplit.findByIdAndUpdate(req.params.id, updateData, { new: true });
   if (!split) return next(new AppError('Commission split not found', 404));
   res.json({ success: true, split });
+});
+
+exports.createCommissionSplit = catchAsync(async (req, res, next) => {
+  const { roleName, percentage, levelOffset, productType } = req.body;
+  if (!roleName || percentage === undefined || levelOffset === undefined) {
+    return next(new AppError('Role name, percentage, and level offset are required', 400));
+  }
+  const split = await CommissionSplit.create({
+    roleName,
+    percentage,
+    levelOffset,
+    productType: productType || 'all',
+  });
+  res.status(201).json({ success: true, split });
+});
+
+exports.deleteCommissionSplit = catchAsync(async (req, res, next) => {
+  const split = await CommissionSplit.findByIdAndDelete(req.params.id);
+  if (!split) return next(new AppError('Split not found', 404));
+  res.json({ success: true, message: 'Split deleted' });
 });
 
 // ======================
@@ -467,26 +491,4 @@ exports.getAllContributions = catchAsync(async (req, res) => {
     .skip((page - 1) * limit);
   const total = await WeeklyContribution.countDocuments();
   res.json({ success: true, contributions, totalPages: Math.ceil(total / limit), currentPage: parseInt(page), total });
-});
-
-
-// ======================
-// COMMISSION SPLITS – CREATE
-// ======================
-exports.createCommissionSplit = catchAsync(async (req, res, next) => {
-  const { roleName, percentage, levelOffset } = req.body;
-  if (!roleName || percentage === undefined || levelOffset === undefined) {
-    return next(new AppError('भूमिका, प्रतिशत और लेवल ऑफसेट आवश्यक हैं', 400));
-  }
-  const split = await CommissionSplit.create({ roleName, percentage, levelOffset });
-  res.status(201).json({ success: true, split });
-});
-
-// ======================
-// COMMISSION SPLITS – DELETE
-// ======================
-exports.deleteCommissionSplit = catchAsync(async (req, res, next) => {
-  const split = await CommissionSplit.findByIdAndDelete(req.params.id);
-  if (!split) return next(new AppError('Split not found', 404));
-  res.json({ success: true, message: 'Split deleted' });
 });

@@ -1,14 +1,15 @@
 // backend/src/services/mlmEngine.js
 const User = require('../models/user.model');
 const CommissionTransaction = require('../models/CommissionTransaction');
-const CommissionSplit = require('../models/CommissionSplit'); // 🆕 डायनामिक स्प्लिट के लिए
+const CommissionSplit = require('../models/CommissionSplit');
+const CommissionLog = require('../models/CommissionLog');  // 🆕
 const mailer = require('../utils/sendEmail');
 
 /**
  * Distribute commission up the sponsor chain
  * @param {ObjectId} userId - The user whose action triggered commission
  * @param {Number} amount - The base amount on which commission is calculated
- * @param {String} type - e.g., 'license_purchase', 'donation', 'enrollment'
+ * @param {String} type - e.g., 'license_sale', 'education_sale', 'agriculture_sale', 'donation'
  * @param {ObjectId|null} referenceId - Reference to the purchase/donation
  */
 async function calculateCommission(userId, amount, type, referenceId = null) {
@@ -16,11 +17,14 @@ async function calculateCommission(userId, amount, type, referenceId = null) {
     const user = await User.findById(userId);
     if (!user || !user.sponsorId) return;
 
-    // 🆕 डायनामिक कमीशन प्रतिशत (एडमिन से बदलने योग्य)
-    const splits = await CommissionSplit.find().sort({ levelOffset: 1 });
+    // 🆕 प्रोडक्ट टाइप के हिसाब से स्प्लिट लाएँ (type + 'all' दोनों)
+    const splits = await CommissionSplit.find({
+      productType: { $in: [type, 'all'] },
+      isActive: true,
+    }).sort({ levelOffset: 1 });
+
     if (!splits.length) {
-      console.warn('No CommissionSplit found – using default 5-level fixed rates');
-      // फॉलबैक: पुराने हार्डकोडेड रेट
+      console.warn(`No CommissionSplit found for type ${type} – using default fixed rates`);
       await distributeWithFixedRates(userId, amount, type, referenceId);
       return;
     }
@@ -28,7 +32,6 @@ async function calculateCommission(userId, amount, type, referenceId = null) {
     let currentSponsor = user;
     let level = 0;
 
-    // स्पॉन्सर चेन में ऊपर जाओ
     while (currentSponsor.sponsorId && level < splits.length) {
       const sponsor = await User.findById(currentSponsor.sponsorId);
       if (!sponsor) break;
@@ -47,28 +50,42 @@ async function calculateCommission(userId, amount, type, referenceId = null) {
           referenceId,
         });
 
-        // 2️⃣ स्पॉन्सर के पेंडिंग कमीशन और कुल कमाई अपडेट करो
+        // 🆕 2️⃣ CommissionLog रिकॉर्ड बनाओ (पूरी डिटेल के साथ)
+        await CommissionLog.create({
+          purchase: type === 'license_sale' ? referenceId : null,
+          sale: type === 'education_sale' || type === 'agriculture_sale' ? referenceId : null,
+          user: sponsor._id,
+          fromUser: userId,
+          amount: commissionAmount,
+          productType: type.replace('_sale', ''),  // 'license', 'education', 'agriculture', 'donation'
+          percentage: split.percentage,
+          level: level + 1,
+          role: sponsor.role,
+          status: 'pending',
+          description: `${type.replace(/_/g, ' ')} commission for level ${level + 1}`,
+        });
+
+        // 3️⃣ स्पॉन्सर के पेंडिंग कमीशन और कुल कमाई अपडेट करो
         await User.findByIdAndUpdate(sponsor._id, {
           $inc: {
-            'mlmPayoutInfo.pendingCommission': commissionAmount,
-            totalCommissionEarned: commissionAmount,
+            'incentivePayoutInfo.pendingIncentive': commissionAmount,
+            totalIncentiveEarned: commissionAmount,
           },
         });
 
-        // 3️⃣ स्पॉन्सर को ईमेल भेजो (असफल होने पर भी रुको मत)
+        // 4️⃣ स्पॉन्सर को ईमेल भेजो
         try {
           await mailer.sendCommissionCredited(
             sponsor.email,
             sponsor.fullName,
             commissionAmount,
-            type.replace('_', ' ')
+            type.replace(/_/g, ' ')
           );
         } catch (emailErr) {
           console.error('Commission email failed:', emailErr.message);
         }
       }
 
-      // अगले लेवल पर जाओ
       currentSponsor = sponsor;
       level++;
     }
@@ -87,7 +104,7 @@ async function distributeWithFixedRates(userId, amount, type, referenceId) {
     const user = await User.findById(userId);
     if (!user || !user.sponsorId) return;
 
-    const rates = [0.10, 0.05, 0.03, 0.02, 0.01]; // 10%,5%,3%,2%,1%
+    const rates = [0.10, 0.05, 0.03, 0.02, 0.01];
     let currentSponsor = user;
     let level = 0;
 
@@ -97,6 +114,7 @@ async function distributeWithFixedRates(userId, amount, type, referenceId) {
 
       const commissionAmount = amount * rates[level];
       if (commissionAmount > 0) {
+        // Transaction
         await CommissionTransaction.create({
           user: sponsor._id,
           sponsor: sponsor._id,
@@ -106,10 +124,25 @@ async function distributeWithFixedRates(userId, amount, type, referenceId) {
           referenceId,
         });
 
+        // 🆕 CommissionLog
+        await CommissionLog.create({
+          purchase: type === 'license_sale' ? referenceId : null,
+          sale: type === 'education_sale' || type === 'agriculture_sale' ? referenceId : null,
+          user: sponsor._id,
+          fromUser: userId,
+          amount: commissionAmount,
+          productType: type.replace('_sale', ''),
+          percentage: rates[level] * 100,
+          level: level + 1,
+          role: sponsor.role,
+          status: 'pending',
+          description: `Fallback ${type.replace(/_/g, ' ')} commission for level ${level + 1}`,
+        });
+
         await User.findByIdAndUpdate(sponsor._id, {
           $inc: {
-            'mlmPayoutInfo.pendingCommission': commissionAmount,
-            totalCommissionEarned: commissionAmount,
+            'incentivePayoutInfo.pendingIncentive': commissionAmount,
+            totalIncentiveEarned: commissionAmount,
           },
         });
 
@@ -118,7 +151,7 @@ async function distributeWithFixedRates(userId, amount, type, referenceId) {
             sponsor.email,
             sponsor.fullName,
             commissionAmount,
-            type.replace('_', ' ')
+            type.replace(/_/g, ' ')
           );
         } catch (emailErr) {
           console.error('Commission email failed:', emailErr.message);
@@ -134,23 +167,26 @@ async function distributeWithFixedRates(userId, amount, type, referenceId) {
 
 /**
  * Process payout – move pending commission to wallet
- * @param {ObjectId} userId
- * @returns {Number|null} amount paid out, or null if nothing to pay
  */
 async function processPayout(userId) {
   const user = await User.findById(userId);
-  if (!user || user.mlmPayoutInfo.pendingCommission <= 0) return null;
+  if (!user || (user.incentivePayoutInfo?.pendingIncentive || 0) <= 0) return null;
 
-  const amount = user.mlmPayoutInfo.pendingCommission;
+  const amount = user.incentivePayoutInfo.pendingIncentive;
   user.walletBalance += amount;
-  user.mlmPayoutInfo.pendingCommission = 0;
-  user.mlmPayoutInfo.totalWithdrawn += amount;
-  user.mlmPayoutInfo.lastPayoutDate = new Date();
-  user.mlmPayoutInfo.nextPayoutDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  user.incentivePayoutInfo.pendingIncentive = 0;
+  user.incentivePayoutInfo.totalWithdrawn = (user.incentivePayoutInfo.totalWithdrawn || 0) + amount;
+  user.incentivePayoutInfo.lastPayoutDate = new Date();
+  user.incentivePayoutInfo.nextPayoutDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await user.save();
 
-  // पेंडिंग कमीशन ट्रांजेक्शंस को "paid" करो
   await CommissionTransaction.updateMany(
+    { user: userId, status: 'pending' },
+    { status: 'paid' }
+  );
+
+  // 🆕 CommissionLog भी अपडेट करो
+  await CommissionLog.updateMany(
     { user: userId, status: 'pending' },
     { status: 'paid' }
   );
