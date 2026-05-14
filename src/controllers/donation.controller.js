@@ -1,28 +1,66 @@
+// backend/src/controllers/donation.controller.js
 const Donation = require('../models/Donation');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
+const { generateDonationReceipt } = require('../services/receiptGenerator');
+const sendEmail = require('../utils/sendEmail');
+const path = require('path');
+const fs = require('fs');
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
+// ── Helper to generate receipt and optionally email it ──
+const attachReceipt = async (donation) => {
+  try {
+    const receiptNumber = `RCPT-${Date.now().toString(36).toUpperCase()}-${donation._id.toString().slice(-6)}`;
+    const receiptUrl = await generateDonationReceipt({
+      donorName: donation.donorName,
+      email: donation.email,
+      amount: donation.amount,
+      purpose: donation.purpose,
+      date: donation.date,
+      receiptNumber,
+    });
+    donation.receiptUrl = receiptUrl;
+    await donation.save();
+
+    // Email the receipt if donor has email
+    if (donation.email) {
+      try {
+        await sendEmail.sendDonationReceipt(donation.email, donation.donorName, receiptUrl);
+        console.log(`Receipt emailed to ${donation.email}`);
+      } catch (emailErr) {
+        console.error('Failed to email receipt:', emailErr.message);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to generate receipt:', err.message);
+  }
+};
+
 // ── 1️⃣ Create Razorpay order for online donation ──
 exports.createDonationOrder = catchAsync(async (req, res, next) => {
-  const { amount } = req.body; // amount in INR
+  const { amount } = req.body;
   if (!amount || amount < 1) {
-    return next(new AppError('दान की राशि आवश्यक है', 400));
+    return next(new AppError('Donation amount is required', 400));
   }
 
+  const shortId = req.user.id.toString().slice(-6);
+  const timestamp = Date.now().toString(36);
+  const receipt = `don_${shortId}_${timestamp}`.slice(0, 40);
+
   const options = {
-    amount: amount * 100, // paise
+    amount: amount * 100,
     currency: 'INR',
-    receipt: `donation_${Date.now()}`,
+    receipt,
     notes: {
       userId: req.user.id,
-      purpose: req.body.purpose || 'दान',
+      purpose: req.body.purpose || 'Donation',
     },
   };
 
@@ -43,14 +81,13 @@ exports.verifyDonationPayment = catchAsync(async (req, res, next) => {
     razorpay_signature,
     donorName,
     purpose,
-    amount,          // INR amount (from frontend)
+    amount,
   } = req.body;
 
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !amount) {
-    return next(new AppError('सभी पेमेंट डिटेल आवश्यक हैं', 400));
+    return next(new AppError('All payment details are required', 400));
   }
 
-  // Verify signature
   const generatedSignature = crypto
     .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
     .update(razorpay_order_id + '|' + razorpay_payment_id)
@@ -60,12 +97,11 @@ exports.verifyDonationPayment = catchAsync(async (req, res, next) => {
     return next(new AppError('Invalid payment signature', 400));
   }
 
-  // Create donation record
   const donation = await Donation.create({
     donorName: donorName || req.user.fullName,
     email: req.user.email,
-    amount,              // INR
-    purpose: purpose || 'ऑनलाइन दान',
+    amount,
+    purpose: purpose || 'Online Donation',
     user: req.user.id,
     type: 'online',
     transactionId: razorpay_payment_id,
@@ -76,9 +112,8 @@ exports.verifyDonationPayment = catchAsync(async (req, res, next) => {
     createdBy: req.user.id,
   });
 
-  // Optional: trigger incentive for donor's sponsor chain (uncomment if needed)
-  // const { calculateCommission } = require('../services/mlmEngine');
-  // await calculateCommission(req.user.id, amount, 'donation', donation._id);
+  // Generate receipt and email
+  await attachReceipt(donation);
 
   res.json({ success: true, donation });
 });
@@ -88,22 +123,25 @@ exports.createDonation = catchAsync(async (req, res, next) => {
   const { donorName, amount, purpose, type } = req.body;
 
   if (!amount || amount < 0) {
-    return next(new AppError('दान की राशि आवश्यक है', 400));
+    return next(new AppError('Donation amount is required', 400));
   }
 
   const donation = await Donation.create({
     donorName: donorName || req.user.fullName,
     email: req.user.email,
     amount,
-    purpose: purpose || 'नकद दान',
+    purpose: purpose || 'Cash Donation',
     user: req.user.id,
-    type: type || 'cash',          // default to cash
+    type: type || 'cash',
     state: req.user.state,
     district: req.user.district,
     block: req.user.block,
     village: req.user.village,
     createdBy: req.user.id,
   });
+
+  // Generate receipt and email
+  await attachReceipt(donation);
 
   res.status(201).json({ success: true, donation });
 });
@@ -144,14 +182,14 @@ exports.createCustomDonation = catchAsync(async (req, res, next) => {
   const { donorName, email, amount, purpose, date, type } = req.body;
 
   if (!amount || amount < 0) {
-    return next(new AppError('दान की राशि आवश्यक है', 400));
+    return next(new AppError('Donation amount is required', 400));
   }
 
   const donation = await Donation.create({
     donorName,
     email,
     amount,
-    purpose: purpose || 'नकद दान',
+    purpose: purpose || 'Cash Donation',
     date: date || new Date(),
     type: type || 'cash',
     createdBy: req.user.id,
@@ -161,5 +199,23 @@ exports.createCustomDonation = catchAsync(async (req, res, next) => {
     village: req.user.village,
   });
 
+  // Generate receipt and email
+  await attachReceipt(donation);
+
   res.status(201).json({ success: true, donation });
+});
+
+// ── 7️⃣ Download receipt ──
+exports.downloadReceipt = catchAsync(async (req, res, next) => {
+  const donation = await Donation.findById(req.params.id);
+  if (!donation || !donation.receiptUrl) {
+    return next(new AppError('Receipt not found', 404));
+  }
+
+  const filePath = path.join(__dirname, '../', donation.receiptUrl);
+  if (!fs.existsSync(filePath)) {
+    return next(new AppError('Receipt file not found', 404));
+  }
+
+  res.download(filePath, `donation_receipt_${donation._id}.pdf`);
 });
