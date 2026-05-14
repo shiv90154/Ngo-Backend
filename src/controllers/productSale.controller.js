@@ -1,9 +1,9 @@
+// backend/src/controllers/productSale.controller.js
 const LicenseType = require('../models/LicenseType');
 const EducationProgram = require('../models/EducationProgram');
 const ProductSale = require('../models/ProductSale');
 const User = require('../models/user.model');
-const { calculateCommission } = require('../services/mlmEngine');
-const catchAsync = require('../utils/catchAsync');        // ✅ अपना हेल्पर
+const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
@@ -40,7 +40,7 @@ exports.sellProduct = catchAsync(async (req, res, next) => {
   const { productType, productId, customerName, customerPhone, customerId, paymentMode } = req.body;
 
   if (!productType || !productId || !customerName) {
-    return next(new AppError('सभी ज़रूरी फ़ील्ड भरें', 400));
+    return next(new AppError('All required fields must be provided', 400));
   }
 
   let amount;
@@ -55,19 +55,19 @@ exports.sellProduct = catchAsync(async (req, res, next) => {
   // Determine product details and amount
   if (productType === 'license') {
     const license = await LicenseType.findById(productId);
-    if (!license) return next(new AppError('लाइसेंस नहीं मिला', 404));
+    if (!license) return next(new AppError('License not found', 404));
     amount = license.membershipFee;
     saleData.licenseType = license._id;
   } else if (productType === 'education') {
     const program = await EducationProgram.findById(productId);
-    if (!program) return next(new AppError('एजुकेशन प्रोग्राम नहीं मिला', 404));
+    if (!program) return next(new AppError('Education program not found', 404));
     amount = program.fee;
     saleData.educationProgram = program._id;
   } else {
-    return next(new AppError('अमान्य प्रोडक्ट टाइप', 400));
+    return next(new AppError('Invalid product type', 400));
   }
 
-  // 🆕 Online payment – create Razorpay order, DO NOT save sale yet
+  // Online payment – create Razorpay order, DO NOT save sale yet
   if (paymentMode === 'online') {
     const options = {
       amount: amount * 100,
@@ -94,10 +94,10 @@ exports.sellProduct = catchAsync(async (req, res, next) => {
 
   // Offline / cash sale – complete immediately
   saleData.amount = amount;
-  saleData.transactionId = 'OFFLINE_' + Date.now();   // ऑफ़लाइन रेफ़रेंस
+  saleData.transactionId = 'OFFLINE_' + Date.now();
   const sale = await ProductSale.create(saleData);
 
-  // ✅ विक्रेता के आँकड़े अपडेट (सिर्फ़ लाइसेंस होने पर)
+  // Update seller stats (license only)
   if (productType === 'license') {
     await User.findByIdAndUpdate(req.user._id, {
       $inc: {
@@ -106,13 +106,12 @@ exports.sellProduct = catchAsync(async (req, res, next) => {
       }
     });
   }
-  // अगर एजुकेशन की बिक्री के लिए अलग आँकड़े रखना चाहो तो भविष्य में जोड़ना।
 
-  // कमीशन बाँटो
-  const commissionType = productType === 'license' ? 'license_sale' : 'education_sale';
-  await calculateCommission(req.user._id, amount, commissionType, sale._id);
+  // ❌ Old MLM commission distribution removed
+  // const commissionType = productType === 'license' ? 'license_sale' : 'education_sale';
+  // await calculateCommission(req.user._id, amount, commissionType, sale._id);
 
-  sale.commissionDistributed = true;
+  sale.commissionDistributed = true; // just mark as completed, no actual distribution here
   await sale.save();
 
   res.status(201).json({ success: true, data: sale });
@@ -149,21 +148,21 @@ exports.verifySalePayment = catchAsync(async (req, res, next) => {
     customerPhone: customerPhone || '',
     soldBy: req.user._id,
     customer: customerId || null,
-    transactionId: razorpay_payment_id,   // रेज़रपे पेमेंट ID
+    transactionId: razorpay_payment_id,
   };
 
   if (productType === 'license') {
     const license = await LicenseType.findById(productId);
-    if (!license) return next(new AppError('लाइसेंस नहीं मिला', 404));
+    if (!license) return next(new AppError('License not found', 404));
     amount = license.membershipFee;
     saleData.licenseType = license._id;
   } else if (productType === 'education') {
     const program = await EducationProgram.findById(productId);
-    if (!program) return next(new AppError('एजुकेशन प्रोग्राम नहीं मिला', 404));
+    if (!program) return next(new AppError('Education program not found', 404));
     amount = program.fee;
     saleData.educationProgram = program._id;
   } else {
-    return next(new AppError('अमान्य प्रोडक्ट टाइप', 400));
+    return next(new AppError('Invalid product type', 400));
   }
 
   saleData.amount = amount;
@@ -178,8 +177,9 @@ exports.verifySalePayment = catchAsync(async (req, res, next) => {
     });
   }
 
-  const commissionType = productType === 'license' ? 'license_sale' : 'education_sale';
-  await calculateCommission(req.user._id, amount, commissionType, sale._id);
+  // ❌ Old MLM commission distribution removed
+  // const commissionType = productType === 'license' ? 'license_sale' : 'education_sale';
+  // await calculateCommission(req.user._id, amount, commissionType, sale._id);
 
   sale.commissionDistributed = true;
   await sale.save();

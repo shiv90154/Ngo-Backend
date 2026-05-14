@@ -1,7 +1,7 @@
+// backend/src/controllers/license.controller.js
 const LicenseType = require('../models/LicenseType');
 const LicensePurchase = require('../models/LicensePurchase');
 const User = require('../models/user.model');
-const { calculateCommission } = require('../services/mlmEngine');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 
@@ -43,7 +43,7 @@ exports.purchaseLicense = catchAsync(async (req, res, next) => {
     licenseType: licenseType._id,
     customerName,
     customerPhone,
-    customer: null,          // अगर ग्राहक बाद में रजिस्टर करे तो लिंक कर देंगे
+    customer: null,
     amount: licenseType.membershipFee,
     soldBy: req.user._id,
   });
@@ -56,15 +56,10 @@ exports.purchaseLicense = catchAsync(async (req, res, next) => {
     }
   });
 
-  // 3. स्पॉन्सर चेन पर कमीशन बाँटो
-  await calculateCommission(
-    req.user._id,
-    licenseType.membershipFee,
-    'license_sale',
-    purchase._id
-  );
+  // ❌ पुराना MLM कमीशन हटाया गया
+  // await calculateCommission(req.user._id, licenseType.membershipFee, 'license_sale', purchase._id);
 
-  // 4. कमीशन वितरित होने का निशान लगाओ
+  // 3. बिक्री पूर्ण
   purchase.commissionDistributed = true;
   await purchase.save();
 

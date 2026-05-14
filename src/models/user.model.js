@@ -12,6 +12,7 @@ const roleLevelMap = {
   BAMS_DOCTOR: 5,
   BLOCK_DEVELOPMENT_COORDINATOR: 6,
   GRAM_DEVELOPMENT_COORDINATOR: 7,
+  NGO_CLUB: 8,                    // 🆕
   IT_DEVELOPER: 10,
   TEACHER: 10,
   NEWS_EDITOR: 10,
@@ -59,6 +60,7 @@ const userSchema = new mongoose.Schema(
         'BAMS_DOCTOR',
         'BLOCK_DEVELOPMENT_COORDINATOR',
         'GRAM_DEVELOPMENT_COORDINATOR',
+        'NGO_CLUB',                  // 🆕
         'IT_DEVELOPER',
         'TEACHER',
         'NEWS_EDITOR',
@@ -109,12 +111,10 @@ const userSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
       default: undefined,
-      set: v => (v === '' ? null : v),                // ✅ नया सेटर जोड़ा गया
+      set: v => (v === '' ? null : v),
     },
     aadhaarImage: String,
     panImage: String,
-
-    // ✅ नए पहचान पत्र (KYC के पास)
     voterId: { type: String, trim: true },
     passportNumber: { type: String, trim: true },
 
@@ -167,8 +167,6 @@ const userSchema = new mongoose.Schema(
         attendedAt: Date,
       },
     ],
-
-    // ✅ स्टूडेंट एजुकेशन प्रोफाइल (नया)
     educationProfile: {
       className: String,
       schoolName: String,
@@ -202,10 +200,7 @@ const userSchema = new mongoose.Schema(
     },
     patients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     appointments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Appointment' }],
-    healthRecords: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'HealthRecord'
-    }],
+    healthRecords: [{ type: mongoose.Schema.Types.ObjectId, ref: 'HealthRecord' }],
     prescriptions: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Prescription' }],
 
     // ========== AGRICULTURE MODULE ==========
@@ -231,7 +226,7 @@ const userSchema = new mongoose.Schema(
     // ========== FINANCE MODULE ==========
     walletBalance: { type: Number, default: 0, min: 0 },
     totalEarnings: { type: Number, default: 0 },
-    totalIncentiveEarned: { type: Number, default: 0 },          // renamed
+    totalIncentiveEarned: { type: Number, default: 0 },
     bankAccount: {
       accountNumber: { type: String, trim: true },
       ifsc: { type: String, trim: true },
@@ -285,27 +280,16 @@ const userSchema = new mongoose.Schema(
       salaryEligible: { type: Boolean, default: false },
     },
 
-    
     contractStatus: {
       type: String,
       enum: ['draft', 'completed', 'rejected'],
       default: 'draft',
     },
-    
-    processingFee: {
-      type: Number,
-      default: 0,
-    },
-    securityDeposit: {
-      type: Number,
-      default: 0,
-    },
+    processingFee: { type: Number, default: 0 },
+    securityDeposit: { type: Number, default: 0 },
     contractCompletedAt: Date,
     contractRejectionReason: String,
-    contractReviewedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-    },
+    contractReviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     contractReviewedAt: Date,
 
     // ========== NEWS & MEDIA MODULE ==========
@@ -331,7 +315,6 @@ const userSchema = new mongoose.Schema(
     storeProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'StoreProduct' }],
     exchangeRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'ExchangeRequest' }],
 
-    // ✅ CRM - क्लाइंट और प्रोजेक्ट (नया)
     clients: [{
       name: String,
       email: String,
@@ -354,14 +337,12 @@ const userSchema = new mongoose.Schema(
       createdAt: { type: Date, default: Date.now },
     }],
 
-    // ✅ IT प्रोफाइल (नया)
     itProfile: {
       projectType: String,
       techStack: String,
       experience: String,
     },
 
-    // ✅ सोशल प्रोफाइल (नया)
     socialProfile: {
       username: String,
       bio: String,
@@ -452,21 +433,17 @@ userSchema.statics.generateUniqueReferralCode = async function () {
 };
 
 // ========== PRE‑SAVE HOOKS ==========
-// ========== PRE‑SAVE HOOKS ==========
 userSchema.pre('save', async function () {
   if (this.isModified('password')) {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
   }
-
   if (this.isNew && !this.referralCode) {
     this.referralCode = await this.constructor.generateUniqueReferralCode();
   }
-
   if (this.isNew && !this.hierarchyLevel) {
     this.hierarchyLevel = roleLevelMap[this.role] || 12;
   }
-  // No next() call – Mongoose 6+ handles async hooks automatically
 });
 
 // ========== INSTANCE METHODS ==========

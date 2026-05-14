@@ -29,11 +29,9 @@ const attachReceipt = async (donation) => {
     donation.receiptUrl = receiptUrl;
     await donation.save();
 
-    // Email the receipt if donor has email
     if (donation.email) {
       try {
         await sendEmail.sendDonationReceipt(donation.email, donation.donorName, receiptUrl);
-        console.log(`Receipt emailed to ${donation.email}`);
       } catch (emailErr) {
         console.error('Failed to email receipt:', emailErr.message);
       }
@@ -112,7 +110,6 @@ exports.verifyDonationPayment = catchAsync(async (req, res, next) => {
     createdBy: req.user.id,
   });
 
-  // Generate receipt and email
   await attachReceipt(donation);
 
   res.json({ success: true, donation });
@@ -140,7 +137,6 @@ exports.createDonation = catchAsync(async (req, res, next) => {
     createdBy: req.user.id,
   });
 
-  // Generate receipt and email
   await attachReceipt(donation);
 
   res.status(201).json({ success: true, donation });
@@ -199,7 +195,6 @@ exports.createCustomDonation = catchAsync(async (req, res, next) => {
     village: req.user.village,
   });
 
-  // Generate receipt and email
   await attachReceipt(donation);
 
   res.status(201).json({ success: true, donation });

@@ -71,6 +71,14 @@ router.patch('/meetings/:id/status', adminController.updateMeetingStatus);
 router.get('/contributions/all', adminController.getAllContributions);
 router.post('/commission-splits', adminController.createCommissionSplit);
 router.delete('/commission-splits/:id', adminController.deleteCommissionSplit);
+router.post('/pi-distribute', protect, restrictTo('SUPER_ADMIN'), adminController.triggerPIDistribution);
 
+// PI Shares
+router.get('/pi-shares', protect, restrictTo('SUPER_ADMIN'), adminController.getPIShares);
+router.post('/pi-shares', protect, restrictTo('SUPER_ADMIN'), adminController.createPIShare);
+router.put('/pi-shares/:id', protect, restrictTo('SUPER_ADMIN'), adminController.updatePIShare);
+router.delete('/pi-shares/:id', protect, restrictTo('SUPER_ADMIN'), adminController.deletePIShare);
 router.get('/payments', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adminController.getAllPayments);
+// backend/src/routes/admin.routes.js में यह रूट जोड़ें
+router.get('/pi-transactions', protect, restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adminController.getPITransactions);
 module.exports = router;
