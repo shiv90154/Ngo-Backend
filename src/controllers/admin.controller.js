@@ -4,16 +4,11 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
 const { distributeMonthlyPI } = require('../services/piEngine');
 const PIShare = require('../models/PIShare');
-// Models that are essential
 const LicenseType = require('../models/LicenseType');
 const LicensePurchase = require('../models/LicensePurchase');
-// const CommissionSplit = require('../models/CommissionSplit');
 const EducationProgram = require('../models/EducationProgram');
-
 const Donation = require('../models/Donation');
 const ProductSale = require('../models/ProductSale');
-
-// Additional models (now created as skeletons)
 const Setting = require('../models/Setting');
 const ActivityLog = require('../models/ActivityLog');
 const MediaPost = require('../models/MediaPost');
@@ -25,15 +20,13 @@ const Course = require('../models/Course');
 const Notification = require('../models/Notification');
 const Meeting = require('../models/Meeting');
 const WeeklyContribution = require('../models/WeeklyContribution');
-// Optional IT models
+
 let Client, Project, Invoice;
 try {
   Client = require('../models/Client');
   Project = require('../models/Project');
   Invoice = require('../models/Invoice');
-} catch (e) {
-  // ignore if not created yet
-}
+} catch (e) {}
 
 // ---------- DASHBOARD STATS ----------
 exports.getStats = catchAsync(async (req, res) => {
@@ -58,11 +51,7 @@ exports.getStats = catchAsync(async (req, res) => {
   ]);
   res.json({
     success: true,
-    stats: {
-      totalUsers, activeUsers, doctors, teachers, totalPosts,
-      totalAppointments, totalTransactions, activeLoans, totalCourses, totalEnrollments,
-      totalLicenses, totalProductSales
-    },
+    stats: { totalUsers, activeUsers, doctors, teachers, totalPosts, totalAppointments, totalTransactions, activeLoans, totalCourses, totalEnrollments, totalLicenses, totalProductSales },
     recentUsers
   });
 });
@@ -70,57 +59,40 @@ exports.getStats = catchAsync(async (req, res) => {
 // ---------- USER MANAGEMENT ----------
 exports.createUser = catchAsync(async (req, res, next) => {
   const { fullName, email, phone, password, role, modules, state, district, block, village, isActive, sponsorReferral } = req.body;
-  if (!fullName || !email || !phone || !password) {
-    return next(new AppError('Full name, email, phone, and password are required', 400));
-  }
-  if (!/^\d{10}$/.test(phone)) {
-    return next(new AppError('Phone must be 10 digits', 400));
-  }
+  if (!fullName || !email || !phone || !password) return next(new AppError('Full name, email, phone, and password are required', 400));
+  if (!/^\d{10}$/.test(phone)) return next(new AppError('Phone must be 10 digits', 400));
   const existing = await User.findOne({ $or: [{ email }, { phone }] });
-  if (existing) {
-    return next(new AppError('User with this email or phone already exists', 400));
-  }
+  if (existing) return next(new AppError('User with this email or phone already exists', 400));
 
-  // 🆕 Resolve sponsor from referral code (if provided)
   let sponsorId = null;
   if (sponsorReferral) {
     const sponsor = await User.findOne({ referralCode: sponsorReferral });
-    if (sponsor) {
-      sponsorId = sponsor._id;
-    } else {
-      return next(new AppError('Invalid sponsor referral code', 400));
-    }
+    if (sponsor) sponsorId = sponsor._id;
+    else return next(new AppError('Invalid sponsor referral code', 400));
   }
 
   const user = await User.create({
     fullName, email, phone, password,
-    role: role || 'USER',
-    modules: modules || [],
+    role: role || 'USER', modules: modules || [],
     state, district, block, village,
     isActive: isActive !== undefined ? isActive : true,
-    isVerified: true,
-    createdBy: req.user.id,
-    sponsorId,
-    sponsorReferral,
+    isVerified: true, createdBy: req.user.id,
+    sponsorId, sponsorReferral,
+    reportsTo: sponsorId || null,
   });
 
   if (sponsorId) {
     const sponsor = await User.findById(sponsorId);
     if (sponsor) {
       sponsor.teamSize = (sponsor.teamSize || 0) + 1;
-      if (!sponsor.leftChild) {
-        sponsor.leftChild = user._id;
-      } else if (!sponsor.rightChild) {
-        sponsor.rightChild = user._id;
-      }
+      if (!sponsor.leftChild) sponsor.leftChild = user._id;
+      else if (!sponsor.rightChild) sponsor.rightChild = user._id;
       await sponsor.save();
     }
   }
 
   const userData = user.toObject();
-  delete userData.password;
-  delete userData.otp;
-  delete userData.otpExpire;
+  delete userData.password; delete userData.otp; delete userData.otpExpire;
   res.status(201).json({ success: true, user: userData });
 });
 
@@ -130,28 +102,13 @@ exports.getUsers = catchAsync(async (req, res) => {
   if (role) query.role = role;
   if (hierarchyLevel) query.hierarchyLevel = parseInt(hierarchyLevel);
   if (search) query.$or = [{ fullName: { $regex: search, $options: 'i' } }, { email: { $regex: search, $options: 'i' } }];
-  const users = await User.find(query)
-    .select('-password -otp -otpExpire')
-    .populate('reportsTo', 'fullName email role')
-    .populate('sponsorId', 'fullName email role')
-    .sort({ hierarchyLevel: 1, createdAt: -1 })
-    .limit(limit * 1)
-    .skip((page - 1) * limit);
+  const users = await User.find(query).select('-password -otp -otpExpire').populate('reportsTo', 'fullName email role').populate('sponsorId', 'fullName email role').sort({ hierarchyLevel: 1, createdAt: -1 }).limit(limit * 1).skip((page - 1) * limit);
   const total = await User.countDocuments(query);
-  res.json({
-    success: true,
-    users,
-    totalPages: Math.ceil(total / limit),
-    currentPage: parseInt(page),
-    total
-  });
+  res.json({ success: true, users, totalPages: Math.ceil(total / limit), currentPage: parseInt(page), total });
 });
 
 exports.getUser = catchAsync(async (req, res, next) => {
-  const user = await User.findById(req.params.id)
-    .select('-password -otp -otpExpire')
-    .populate('reportsTo', 'fullName email role')
-    .populate('sponsorId', 'fullName email role');
+  const user = await User.findById(req.params.id).select('-password -otp -otpExpire').populate('reportsTo', 'fullName email role').populate('sponsorId', 'fullName email role');
   if (!user) return next(new AppError('User not found', 404));
   res.json({ success: true, user });
 });
@@ -160,9 +117,7 @@ exports.updateUser = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.params.id);
   if (!user) return next(new AppError('User not found', 404));
   const allowedFields = ['role', 'modules', 'isActive', 'reportsTo', 'sponsorId', 'hierarchyLevel', 'incentivePayoutInfo', 'password'];
-  allowedFields.forEach(field => {
-    if (req.body[field] !== undefined) user[field] = req.body[field];
-  });
+  allowedFields.forEach(field => { if (req.body[field] !== undefined) user[field] = req.body[field]; });
   user.updatedBy = req.user.id;
   await user.save();
   res.json({ success: true, user });
@@ -179,25 +134,28 @@ exports.toggleActive = catchAsync(async (req, res, next) => {
 exports.deleteUser = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.params.id);
   if (!user) return next(new AppError('User not found', 404));
-  user.isDeleted = true;
-  user.deletedAt = new Date();
-  user.isActive = false;
+  user.isDeleted = true; user.deletedAt = new Date(); user.isActive = false;
   await user.save();
   res.json({ success: true, message: 'User deactivated' });
 });
 
-// ---------- HIERARCHY ----------
+// ---------- HIERARCHY (FIXED) ----------
 exports.getHierarchy = catchAsync(async (req, res) => {
-  const users = await User.find({ isDeleted: false })
-    .select('fullName role hierarchyLevel reportsTo email sponsorId')
+  const ngoRoles = [
+    'SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_DEVELOPMENT_COORDINATOR',
+    'DISTRICT_BRANCH_MANAGER', 'DISTRICT_PRESIDENT', 'DISTRICT_FIELD_COORDINATOR',
+    'BAMS_DOCTOR', 'BLOCK_DEVELOPMENT_COORDINATOR', 'GRAM_DEVELOPMENT_COORDINATOR',
+    'NGO_CLUB', 'NGO_CONSULTANCY'
+  ];
+  const users = await User.find({ isDeleted: false, role: { $in: ngoRoles } })
+    .select('fullName role hierarchyLevel reportsTo email phone state district block teamSize')
     .sort('hierarchyLevel');
   res.json({ success: true, users });
 });
 
 exports.getSubordinates = catchAsync(async (req, res, next) => {
   const userId = req.params.id || req.user.id;
-  const subs = await User.find({ reportsTo: userId, isDeleted: false })
-    .select('fullName email role hierarchyLevel');
+  const subs = await User.find({ reportsTo: userId, isDeleted: false }).select('fullName email role hierarchyLevel');
   res.json({ success: true, subordinates: subs });
 });
 
@@ -212,11 +170,7 @@ exports.getSettings = catchAsync(async (req, res) => {
 exports.updateSettings = catchAsync(async (req, res) => {
   const updates = req.body;
   for (const [key, value] of Object.entries(updates)) {
-    await Setting.findOneAndUpdate(
-      { key },
-      { key, value, updatedAt: new Date() },
-      { upsert: true, new: true }
-    );
+    await Setting.findOneAndUpdate({ key }, { key, value, updatedAt: new Date() }, { upsert: true, new: true });
   }
   res.json({ success: true, message: 'Settings saved' });
 });
@@ -227,21 +181,12 @@ exports.getLogs = catchAsync(async (req, res) => {
   const query = {};
   if (action) query.action = action;
   if (userId) query.user = userId;
-  const logs = await ActivityLog.find(query)
-    .populate('user', 'fullName email')
-    .sort('-createdAt')
-    .limit(limit * 1)
-    .skip((page - 1) * limit);
+  const logs = await ActivityLog.find(query).populate('user', 'fullName email').sort('-createdAt').limit(limit * 1).skip((page - 1) * limit);
   const total = await ActivityLog.countDocuments(query);
-  res.json({
-    success: true,
-    logs,
-    totalPages: Math.ceil(total / limit),
-    currentPage: parseInt(page)
-  });
+  res.json({ success: true, logs, totalPages: Math.ceil(total / limit), currentPage: parseInt(page) });
 });
 
-// ---------- MODULE DATA (safe) ----------
+// ---------- MODULE DATA ----------
 exports.getModuleData = catchAsync(async (req, res, next) => {
   const { module } = req.params;
   let data;
@@ -250,24 +195,21 @@ exports.getModuleData = catchAsync(async (req, res, next) => {
       data = {
         appointments: await Appointment.countDocuments().catch(() => 0),
         doctors: await User.countDocuments({ role: 'BAMS_DOCTOR' }),
-        recentAppointments: await Appointment.find().sort('-createdAt').limit(5)
-          .populate('doctorId patientId').catch(() => [])
+        recentAppointments: await Appointment.find().sort('-createdAt').limit(5).populate('doctorId patientId').catch(() => [])
       };
       break;
     case 'education':
       data = {
         courses: await Course.countDocuments().catch(() => 0),
         enrollments: await Enrollment.countDocuments().catch(() => 0),
-        recentCourses: await Course.find().sort('-createdAt').limit(5)
-          .populate('instructor').catch(() => [])
+        recentCourses: await Course.find().sort('-createdAt').limit(5).populate('instructor').catch(() => [])
       };
       break;
     case 'finance':
       data = {
         transactions: await Transaction.countDocuments().catch(() => 0),
         activeLoans: await Loan.countDocuments({ status: 'active' }).catch(() => 0),
-        recentTransactions: await Transaction.find().sort('-createdAt').limit(5)
-          .populate('user').catch(() => [])
+        recentTransactions: await Transaction.find().sort('-createdAt').limit(5).populate('user').catch(() => [])
       };
       break;
     case 'it':
@@ -275,17 +217,10 @@ exports.getModuleData = catchAsync(async (req, res, next) => {
         const Client = require('../models/Client');
         const Project = require('../models/Project');
         const Invoice = require('../models/Invoice');
-        data = {
-          clients: await Client.countDocuments(),
-          projects: await Project.countDocuments(),
-          invoices: await Invoice.countDocuments()
-        };
-      } catch (e) {
-        data = { message: 'IT models not found' };
-      }
+        data = { clients: await Client.countDocuments(), projects: await Project.countDocuments(), invoices: await Invoice.countDocuments() };
+      } catch (e) { data = { message: 'IT models not found' }; }
       break;
-    default:
-      return next(new AppError('Invalid module', 400));
+    default: return next(new AppError('Invalid module', 400));
   }
   res.json({ success: true, data });
 });
@@ -293,18 +228,9 @@ exports.getModuleData = catchAsync(async (req, res, next) => {
 // ---------- GLOBAL NOTIFICATIONS ----------
 exports.sendGlobalNotification = catchAsync(async (req, res, next) => {
   const { title, message } = req.body;
-  if (!title || !message) {
-    return next(new AppError('Title and message are required', 400));
-  }
+  if (!title || !message) return next(new AppError('Title and message are required', 400));
   const users = await User.find({ isActive: true });
-  await Notification.insertMany(
-    users.map(user => ({
-      recipient: user._id,
-      sender: req.user.id,
-      type: 'global',
-      metadata: { title, message }
-    }))
-  );
+  await Notification.insertMany(users.map(user => ({ recipient: user._id, sender: req.user.id, type: 'global', metadata: { title, message } })));
   res.json({ success: true, message: `Sent to ${users.length} users` });
 });
 
@@ -328,23 +254,14 @@ exports.exportUsers = catchAsync(async (req, res) => {
   res.send(csv);
 });
 
-// ======================
-// LICENSE TYPE MANAGEMENT
-// ======================
-exports.getLicenseTypes = catchAsync(async (req, res) => {
-  const types = await LicenseType.find({ isActive: true }).sort('membershipFee');
-  res.json({ success: true, types });
-});
+// ====================== LICENSE TYPE MANAGEMENT ======================
+exports.getLicenseTypes = catchAsync(async (req, res) => { const types = await LicenseType.find({ isActive: true }).sort('membershipFee'); res.json({ success: true, types }); });
 
 exports.createLicenseType = catchAsync(async (req, res, next) => {
   const { name, code, membershipFee, incentiveAmount, description } = req.body;
-  if (!name || membershipFee === undefined || incentiveAmount === undefined) {
-    return next(new AppError('Name, membershipFee, and incentiveAmount are required', 400));
-  }
+  if (!name || membershipFee === undefined || incentiveAmount === undefined) return next(new AppError('Name, membershipFee, and incentiveAmount are required', 400));
   const duplicate = await LicenseType.findOne({ $or: [{ name }, { code }] });
-  if (duplicate) {
-    return next(new AppError('License type with that name or code already exists', 400));
-  }
+  if (duplicate) return next(new AppError('License type with that name or code already exists', 400));
   const type = await LicenseType.create({ name, code, membershipFee, incentiveAmount, description });
   res.status(201).json({ success: true, type });
 });
@@ -353,9 +270,7 @@ exports.updateLicenseType = catchAsync(async (req, res, next) => {
   const type = await LicenseType.findById(req.params.id);
   if (!type) return next(new AppError('License type not found', 404));
   const allowedFields = ['name', 'code', 'membershipFee', 'incentiveAmount', 'description'];
-  allowedFields.forEach(field => {
-    if (req.body[field] !== undefined) type[field] = req.body[field];
-  });
+  allowedFields.forEach(field => { if (req.body[field] !== undefined) type[field] = req.body[field]; });
   await type.save();
   res.json({ success: true, type });
 });
@@ -366,72 +281,16 @@ exports.deleteLicenseType = catchAsync(async (req, res, next) => {
   res.json({ success: true, message: 'License type deleted' });
 });
 
-// ======================
-// LICENSE PURCHASES
-// ======================
+// ====================== LICENSE PURCHASES ======================
 exports.getAllLicensePurchases = catchAsync(async (req, res) => {
   const { page = 1, limit = 20 } = req.query;
-  const purchases = await LicensePurchase.find()
-    .sort('-purchaseDate')
-    .populate('licenseType', 'name incentiveAmount')
-    .populate('soldBy', 'fullName email')
-    .populate('customer', 'fullName email')
-    .limit(limit * 1)
-    .skip((page - 1) * limit);
+  const purchases = await LicensePurchase.find().sort('-purchaseDate').populate('licenseType', 'name incentiveAmount').populate('soldBy', 'fullName email').populate('customer', 'fullName email').limit(limit * 1).skip((page - 1) * limit);
   const total = await LicensePurchase.countDocuments();
   res.json({ success: true, purchases, totalPages: Math.ceil(total / limit), currentPage: parseInt(page), total });
 });
 
-// ======================
-// COMMISSION SPLITS
-// ======================
-exports.getCommissionSplits = catchAsync(async (req, res) => {
-  const splits = await CommissionSplit.find().sort('levelOffset');
-  res.json({ success: true, splits });
-});
-
-exports.updateCommissionSplit = catchAsync(async (req, res, next) => {
-  const { percentage, productType } = req.body;
-  const updateData = {};
-  if (percentage !== undefined) updateData.percentage = percentage;
-  if (productType !== undefined) updateData.productType = productType;
-  
-  if (Object.keys(updateData).length === 0) {
-    return next(new AppError('No fields to update', 400));
-  }
-  
-  const split = await CommissionSplit.findByIdAndUpdate(req.params.id, updateData, { new: true });
-  if (!split) return next(new AppError('Commission split not found', 404));
-  res.json({ success: true, split });
-});
-
-exports.createCommissionSplit = catchAsync(async (req, res, next) => {
-  const { roleName, percentage, levelOffset, productType } = req.body;
-  if (!roleName || percentage === undefined || levelOffset === undefined) {
-    return next(new AppError('Role name, percentage, and level offset are required', 400));
-  }
-  const split = await CommissionSplit.create({
-    roleName,
-    percentage,
-    levelOffset,
-    productType: productType || 'all',
-  });
-  res.status(201).json({ success: true, split });
-});
-
-exports.deleteCommissionSplit = catchAsync(async (req, res, next) => {
-  const split = await CommissionSplit.findByIdAndDelete(req.params.id);
-  if (!split) return next(new AppError('Split not found', 404));
-  res.json({ success: true, message: 'Split deleted' });
-});
-
-// ======================
-// EDUCATION PROGRAMS
-// ======================
-exports.getEducationPrograms = catchAsync(async (req, res) => {
-  const programs = await EducationProgram.find().sort('class');
-  res.json({ success: true, programs });
-});
+// ====================== EDUCATION PROGRAMS ======================
+exports.getEducationPrograms = catchAsync(async (req, res) => { const programs = await EducationProgram.find().sort('class'); res.json({ success: true, programs }); });
 
 exports.updateEducationProgram = catchAsync(async (req, res, next) => {
   const { fee, incentive } = req.body;
@@ -443,33 +302,49 @@ exports.updateEducationProgram = catchAsync(async (req, res, next) => {
   res.json({ success: true, program });
 });
 
-// ======================
-// ALL PRODUCT SALES (Admin view)
-// ======================
+// ====================== ALL PRODUCT SALES ======================
 exports.getAllProductSales = catchAsync(async (req, res) => {
   const { page = 1, limit = 20 } = req.query;
-  const sales = await ProductSale.find()
-    .sort('-purchaseDate')
-    .populate('licenseType', 'name')
-    .populate('educationProgram', 'title')
-    .populate('soldBy', 'fullName email role')
-    .populate('customer', 'fullName email')
-    .limit(limit * 1)
-    .skip((page - 1) * limit);
+  const sales = await ProductSale.find().sort('-purchaseDate').populate('licenseType', 'name').populate('educationProgram', 'title').populate('soldBy', 'fullName email role').populate('customer', 'fullName email').limit(limit * 1).skip((page - 1) * limit);
   const total = await ProductSale.countDocuments();
   res.json({ success: true, sales, totalPages: Math.ceil(total / limit), currentPage: parseInt(page), total });
 });
 
-// ======================
-// MEETINGS
-// ======================
+// ====================== ALL PAYMENTS ======================
+exports.getAllPayments = catchAsync(async (req, res) => {
+  const { page = 1, limit = 20, type, search } = req.query;
+  const pageNum = parseInt(page), limitNum = parseInt(limit);
+  let donationQuery = {}, saleQuery = {}, licenseQuery = {}, walletQuery = {};
+  if (type === 'donation') { donationQuery = {}; saleQuery = { _id: null }; licenseQuery = { _id: null }; walletQuery = { _id: null }; }
+  else if (type === 'product_sale') { donationQuery = { _id: null }; saleQuery = {}; licenseQuery = {}; walletQuery = { _id: null }; }
+  else if (type === 'wallet_topup') { donationQuery = { _id: null }; saleQuery = { _id: null }; licenseQuery = { _id: null }; walletQuery = {}; }
+  if (search) {
+    const regex = new RegExp(search, 'i');
+    donationQuery = { ...donationQuery, $or: [{ donorName: regex }, { email: regex }] };
+    saleQuery = { ...saleQuery, $or: [{ customerName: regex }] };
+    licenseQuery = { ...licenseQuery, $or: [{ customerName: regex }] };
+    walletQuery = { ...walletQuery, $or: [{ description: regex }] };
+  }
+  const [donations, productSales, licensePurchases, walletTransactions] = await Promise.all([
+    Donation.find(donationQuery).select('donorName email amount type createdAt').lean(),
+    ProductSale.find(saleQuery).select('customerName amount productType purchaseDate').lean(),
+    LicensePurchase.find(licenseQuery).select('customerName amount purchaseDate').lean(),
+    Transaction.find(walletQuery).select('user amount description type createdAt').populate('user', 'fullName email').lean()
+  ]);
+  const unified = [
+    ...donations.map(d => ({ _id: d._id, type: 'donation', customer: d.donorName, email: d.email, amount: d.amount, method: d.type, date: d.createdAt, description: 'Donation' })),
+    ...productSales.map(s => ({ _id: s._id, type: 'product_sale', customer: s.customerName, email: '', amount: s.amount, method: 'online', date: s.purchaseDate, description: s.productType === 'license' ? 'License Purchase' : 'Education Program' })),
+    ...licensePurchases.map(l => ({ _id: l._id, type: 'license_purchase', customer: l.customerName, email: '', amount: l.amount, method: 'online', date: l.purchaseDate, description: 'License Purchase' })),
+    ...walletTransactions.map(t => ({ _id: t._id, type: 'wallet_topup', customer: t.user?.fullName || 'Unknown', email: t.user?.email || '', amount: t.amount, method: t.type === 'credit' ? 'online' : 'debit', date: t.createdAt, description: t.description || 'Wallet Top-up' }))
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const total = unified.length;
+  res.json({ success: true, payments: unified.slice((pageNum - 1) * limitNum, pageNum * limitNum), total, totalPages: Math.ceil(total / limitNum), currentPage: pageNum });
+});
+
+// ====================== MEETINGS ======================
 exports.getAllMeetings = catchAsync(async (req, res) => {
   const { page = 1, limit = 50 } = req.query;
-  const meetings = await Meeting.find()
-    .sort('-startTime')
-    .populate('host', 'fullName email')
-    .limit(limit * 1)
-    .skip((page - 1) * limit);
+  const meetings = await Meeting.find().sort('-startTime').populate('host', 'fullName email').limit(limit * 1).skip((page - 1) * limit);
   const total = await Meeting.countDocuments();
   res.json({ success: true, meetings, totalPages: Math.ceil(total / limit), currentPage: parseInt(page), total });
 });
@@ -482,180 +357,35 @@ exports.updateMeetingStatus = catchAsync(async (req, res, next) => {
   res.json({ success: true, meeting });
 });
 
-// ======================
-// WEEKLY CONTRIBUTIONS
-// ======================
+// ====================== WEEKLY CONTRIBUTIONS ======================
 exports.getAllContributions = catchAsync(async (req, res) => {
   const { page = 1, limit = 50 } = req.query;
-  const contributions = await WeeklyContribution.find()
-    .sort('-date')
-    .populate('gramVikasAdhikari', 'fullName email')
-    .limit(limit * 1)
-    .skip((page - 1) * limit);
+  const contributions = await WeeklyContribution.find().sort('-date').populate('gramVikasAdhikari', 'fullName email').limit(limit * 1).skip((page - 1) * limit);
   const total = await WeeklyContribution.countDocuments();
   res.json({ success: true, contributions, totalPages: Math.ceil(total / limit), currentPage: parseInt(page), total });
 });
 
-exports.getAllPayments = catchAsync(async (req, res) => {
-  const { page = 1, limit = 20, type, search } = req.query;
-  const pageNum = parseInt(page);
-  const limitNum = parseInt(limit);
-
-  // Prepare individual queries
-  let donationQuery = {};
-  let saleQuery = {};
-  let licenseQuery = {};
-  let walletQuery = {};
-
-  if (type === 'donation') {
-    donationQuery = {};
-    saleQuery = { _id: null };   // exclude
-    licenseQuery = { _id: null };
-    walletQuery = { _id: null };
-  } else if (type === 'product_sale') {
-    donationQuery = { _id: null };
-    saleQuery = {};
-    licenseQuery = {};
-    walletQuery = { _id: null };
-  } else if (type === 'wallet_topup') {
-    donationQuery = { _id: null };
-    saleQuery = { _id: null };
-    licenseQuery = { _id: null };
-    walletQuery = {};
-  }
-
-  if (search) {
-    const regex = new RegExp(search, 'i');
-    donationQuery = { ...donationQuery, $or: [{ donorName: regex }, { email: regex }] };
-    saleQuery = { ...saleQuery, $or: [{ customerName: regex }] };
-    licenseQuery = { ...licenseQuery, $or: [{ customerName: regex }] };
-    walletQuery = { ...walletQuery, $or: [{ description: regex }] };
-  }
-
-  const [
-    donations,
-    productSales,
-    licensePurchases,
-    walletTransactions,
-    donationCount,
-    saleCount,
-    licenseCount,
-    walletCount
-  ] = await Promise.all([
-    Donation.find(donationQuery).select('donorName email amount type createdAt').lean(),
-    ProductSale.find(saleQuery).select('customerName amount productType purchaseDate').lean(),
-    LicensePurchase.find(licenseQuery).select('customerName amount purchaseDate').lean(),
-    Transaction.find(walletQuery).select('user amount description type createdAt').populate('user', 'fullName email').lean(),
-    Donation.countDocuments(donationQuery),
-    ProductSale.countDocuments(saleQuery),
-    LicensePurchase.countDocuments(licenseQuery),
-    Transaction.countDocuments(walletQuery)
-  ]);
-
-  // Map to unified format
-  const unifiedDonations = donations.map(d => ({
-    _id: d._id,
-    type: 'donation',
-    customer: d.donorName,
-    email: d.email,
-    amount: d.amount,
-    method: d.type,
-    date: d.createdAt,
-    description: 'Donation',
-  }));
-
-  const unifiedSales = productSales.map(s => ({
-    _id: s._id,
-    type: 'product_sale',
-    customer: s.customerName,
-    email: '',
-    amount: s.amount,
-    method: 'online',
-    date: s.purchaseDate,
-    description: s.productType === 'license' ? 'License Purchase' : 'Education Program',
-  }));
-
-  const unifiedLicenses = licensePurchases.map(l => ({
-    _id: l._id,
-    type: 'license_purchase',
-    customer: l.customerName,
-    email: '',
-    amount: l.amount,
-    method: 'online',
-    date: l.purchaseDate,
-    description: 'License Purchase',
-  }));
-
-  const unifiedWallet = walletTransactions.map(t => ({
-    _id: t._id,
-    type: 'wallet_topup',
-    customer: t.user?.fullName || 'Unknown',
-    email: t.user?.email || '',
-    amount: t.amount,
-    method: t.type === 'credit' ? 'online' : 'debit',
-    date: t.createdAt,
-    description: t.description || 'Wallet Top-up',
-  }));
-
-  let allPayments = [...unifiedDonations, ...unifiedSales, ...unifiedLicenses, ...unifiedWallet];
-
-  // Sort by date descending
-  allPayments.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-  const total = allPayments.length;
-  const totalPages = Math.ceil(total / limitNum);
-  const paginatedPayments = allPayments.slice((pageNum - 1) * limitNum, pageNum * limitNum);
-
-  res.json({
-    success: true,
-    payments: paginatedPayments,
-    total,
-    totalPages,
-    currentPage: pageNum,
-  });
-});
+// ====================== PI SYSTEM ======================
 exports.triggerPIDistribution = catchAsync(async (req, res, next) => {
   const result = await distributeMonthlyPI();
-  res.json({
-    success: true,
-    message: 'PI Distribution completed successfully',
-    data: result,
-  });
+  res.json({ success: true, message: 'PI Distribution completed', data: result });
 });
 
-// PI Shares Management
-exports.getPIShares = catchAsync(async (req, res) => {
-  const shares = await PIShare.find().sort('role');
-  res.json({ success: true, shares });
-});
+exports.getPIShares = catchAsync(async (req, res) => { const shares = await PIShare.find().sort('role'); res.json({ success: true, shares }); });
 
 exports.createPIShare = catchAsync(async (req, res, next) => {
   const { role, percentage } = req.body;
-  if (!role || percentage === undefined) {
-    return next(new AppError('Role and percentage are required', 400));
-  }
-
+  if (!role || percentage === undefined) return next(new AppError('Role and percentage are required', 400));
   const existing = await PIShare.findOne({ role });
-  if (existing) {
-    return next(new AppError('PI Share for this role already exists', 400));
-  }
-
+  if (existing) return next(new AppError('PI Share for this role already exists', 400));
   const share = await PIShare.create({ role, percentage });
   res.status(201).json({ success: true, share });
 });
 
 exports.updatePIShare = catchAsync(async (req, res, next) => {
   const { percentage } = req.body;
-  if (percentage === undefined) {
-    return next(new AppError('Percentage is required', 400));
-  }
-
-  const share = await PIShare.findByIdAndUpdate(
-    req.params.id,
-    { percentage },
-    { new: true, runValidators: true }
-  );
-
+  if (percentage === undefined) return next(new AppError('Percentage is required', 400));
+  const share = await PIShare.findByIdAndUpdate(req.params.id, { percentage }, { new: true, runValidators: true });
   if (!share) return next(new AppError('PI Share not found', 404));
   res.json({ success: true, share });
 });
@@ -666,38 +396,11 @@ exports.deletePIShare = catchAsync(async (req, res, next) => {
   res.json({ success: true, message: 'PI Share deleted' });
 });
 
-
 exports.getPITransactions = catchAsync(async (req, res) => {
   const { page = 1, limit = 20, search } = req.query;
-
-  const query = {
-    description: { $regex: 'PI Distribution', $options: 'i' },
-    type: 'credit',
-    status: 'completed',
-  };
-
-  if (search) {
-    // First find matching users
-    const users = await User.find({
-      fullName: { $regex: search, $options: 'i' }
-    }).select('_id');
-    query.user = { $in: users.map(u => u._id) };
-  }
-
-  const transactions = await Transaction.find(query)
-    .populate('user', 'fullName email role')
-    .sort('-createdAt')
-    .limit(parseInt(limit))
-    .skip((parseInt(page) - 1) * parseInt(limit))
-    .lean();
-
+  const query = { description: { $regex: 'PI Distribution', $options: 'i' }, type: 'credit', status: 'completed' };
+  if (search) { const users = await User.find({ fullName: { $regex: search, $options: 'i' } }).select('_id'); query.user = { $in: users.map(u => u._id) }; }
+  const transactions = await Transaction.find(query).populate('user', 'fullName email role').sort('-createdAt').limit(parseInt(limit)).skip((parseInt(page) - 1) * parseInt(limit)).lean();
   const total = await Transaction.countDocuments(query);
-
-  res.json({
-    success: true,
-    transactions,
-    total,
-    totalPages: Math.ceil(total / parseInt(limit)),
-    currentPage: parseInt(page),
-  });
+  res.json({ success: true, transactions, total, totalPages: Math.ceil(total / parseInt(limit)), currentPage: parseInt(page) });
 });
