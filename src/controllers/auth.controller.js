@@ -259,7 +259,7 @@ exports.register = async (req, res) => {
     if (req.files) {
       for (const field in req.files) {
         for (const file of req.files[field]) {
-          await fs.unlink(file.path).catch(() => {});
+          await fs.unlink(file.path).catch(() => { });
         }
       }
     }
@@ -295,7 +295,52 @@ exports.verifyOTP = async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRE || '7d' }
     );
+    try { await sendEmail.sendWelcome(user.email, user.fullName); } catch (e) { }
+    try {
+      // const certificateResult = await generateCertificate({
+      //   recipientName: user.fullName,
+      //   certificateType: "Membership Certificate",
+      //   issueDate: new Date(),
+      //   state: user.state,
+      //   district: user.district,
+      //   idNumber: user._id.toString(),
+      //   photoPath: user.profileImage,
+      // });
 
+      const idCardResult = await generateIdCard({
+        name: user.fullName,
+        role: user.role,
+        phone: user.phone,
+        email: user.email,
+        photoPath: user.profileImage,
+        idNumber: user._id.toString(),
+      });
+      const attachments = [
+        // {
+        //   filename: `${user.fullName || "user"}-certificate.pdf`,
+        //   path: certificateResult.filePath,
+        //   contentType: "application/pdf",
+        // },
+        {
+          filename: `${user.fullName || "user"}-id-card.pdf`,
+          path: idCardResult.filePath,
+          contentType: "application/pdf",
+        }
+      ];
+
+      await sendEmail.sendRegistrationDocuments(
+        user.email,
+        user.fullName,
+        attachments
+      );
+    } catch (mailErr) {
+      console.error("Registration documents email error:", mailErr);
+    }
+    const token = jwt.sign(
+      { id: user._id, role: user.role, modules: user.modules },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRE || '7d' }
+    );
     const userData = user.toObject();
     delete userData.password;
     delete userData.otp;
@@ -469,7 +514,7 @@ exports.updateProfile = async (req, res) => {
 
       if (oldPathField && user[oldPathField]) {
         const oldFilePath = path.join(__dirname, '../..', user[oldPathField]);
-        await fs.unlink(oldFilePath).catch(() => {});
+        await fs.unlink(oldFilePath).catch(() => { });
       }
 
       const ext = path.extname(file.originalname);
@@ -512,8 +557,8 @@ exports.updateProfile = async (req, res) => {
 
     // Emergency contact – merge
     if (req.body.emergencyContactName !== undefined ||
-        req.body.emergencyContactRelation !== undefined ||
-        req.body.emergencyContactPhone !== undefined) {
+      req.body.emergencyContactRelation !== undefined ||
+      req.body.emergencyContactPhone !== undefined) {
       user.emergencyContact = {
         name: req.body.emergencyContactName ?? user.emergencyContact?.name,
         relationship: req.body.emergencyContactRelation ?? user.emergencyContact?.relationship,
@@ -627,7 +672,7 @@ exports.updateProfile = async (req, res) => {
     if (req.files) {
       for (const field in req.files) {
         for (const file of req.files[field]) {
-          await fs.unlink(file.path).catch(() => {});
+          await fs.unlink(file.path).catch(() => { });
         }
       }
     }
@@ -739,7 +784,7 @@ exports.deleteUser = async (req, res) => {
     if (hardDelete === 'true') {
       if (user.profileImage) {
         const filePath = path.join(__dirname, '../..', user.profileImage);
-        await fs.unlink(filePath).catch(() => {});
+        await fs.unlink(filePath).catch(() => { });
       }
       await User.findByIdAndDelete(req.params.id);
       res.json({ success: true, message: 'User permanently deleted' });
@@ -905,7 +950,7 @@ exports.addHealthRecord = async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'Health record added', healthRecords: user.healthRecords });
   } catch (error) {
-    if (req.file) await fs.unlink(req.file.path).catch(() => {});
+    if (req.file) await fs.unlink(req.file.path).catch(() => { });
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -942,7 +987,7 @@ exports.addProductListing = async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'Product added', product: newProduct });
   } catch (error) {
-    if (req.file) await fs.unlink(req.file.path).catch(() => {});
+    if (req.file) await fs.unlink(req.file.path).catch(() => { });
     res.status(500).json({ success: false, error: error.message });
   }
 };
@@ -1087,7 +1132,7 @@ exports.addStoreProduct = async (req, res) => {
     await user.save();
     res.json({ success: true, message: 'Store product added', product });
   } catch (error) {
-    if (req.file) await fs.unlink(req.file.path).catch(() => {});
+    if (req.file) await fs.unlink(req.file.path).catch(() => { });
     res.status(500).json({ success: false, error: error.message });
   }
 };
