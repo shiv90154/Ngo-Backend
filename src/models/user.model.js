@@ -1,19 +1,28 @@
+// backend/src/models/user.model.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 
 const roleLevelMap = {
   SUPER_ADMIN: 0,
   ADDITIONAL_DIRECTOR: 1,
-  STATE_OFFICER: 2,
-  DISTRICT_MANAGER: 3,
+  STATE_DEVELOPMENT_COORDINATOR: 2,
+  DISTRICT_BRANCH_MANAGER: 3,
   DISTRICT_PRESIDENT: 4,
-  FIELD_OFFICER: 5,
-  BLOCK_OFFICER: 6,
-  VILLAGE_OFFICER: 7,
-  DOCTOR: 8,
-  TEACHER: 8,
-  AGENT: 8,
-  USER: 9,
+  DISTRICT_FIELD_COORDINATOR: 5,
+  BAMS_DOCTOR: 5,
+  BLOCK_DEVELOPMENT_COORDINATOR: 6,
+  GRAM_DEVELOPMENT_COORDINATOR: 7,
+  NGO_CLUB: 8,                    // 🆕
+  IT_DEVELOPER: 10,
+  TEACHER: 10,
+  NEWS_EDITOR: 10,
+  AGRICULTURE_CONSULTANCY: 10,
+  FINANCE_SERVICE_CONSULTANCY: 10,
+  NGO_CONSULTANCY: 10,
+  PROJECT_BASED_INTEGRATED_ROLE: 10,
+  VENDOR: 11,
+  AGENT: 11,
+  USER: 12,
 };
 
 const userSchema = new mongoose.Schema(
@@ -44,14 +53,22 @@ const userSchema = new mongoose.Schema(
       enum: [
         'SUPER_ADMIN',
         'ADDITIONAL_DIRECTOR',
-        'STATE_OFFICER',
-        'DISTRICT_MANAGER',
+        'STATE_DEVELOPMENT_COORDINATOR',
+        'DISTRICT_BRANCH_MANAGER',
         'DISTRICT_PRESIDENT',
-        'FIELD_OFFICER',
-        'BLOCK_OFFICER',
-        'VILLAGE_OFFICER',
-        'DOCTOR',
+        'DISTRICT_FIELD_COORDINATOR',
+        'BAMS_DOCTOR',
+        'BLOCK_DEVELOPMENT_COORDINATOR',
+        'GRAM_DEVELOPMENT_COORDINATOR',
+        'NGO_CLUB',                  // 🆕
+        'IT_DEVELOPER',
         'TEACHER',
+        'NEWS_EDITOR',
+        'AGRICULTURE_CONSULTANCY',
+        'FINANCE_SERVICE_CONSULTANCY',
+        'NGO_CONSULTANCY',
+        'PROJECT_BASED_INTEGRATED_ROLE',
+        'VENDOR',
         'AGENT',
         'USER',
       ],
@@ -63,12 +80,11 @@ const userSchema = new mongoose.Schema(
       default: [],
     },
 
-    // ========== HIERARCHY & MLM ==========
+    // ========== HIERARCHY & NETWORK ==========
     reportsTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     hierarchyLevel: { type: Number, default: 0, min: 0 },
     sponsorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     referralCode: { type: String, unique: true, sparse: true },
-    mlmLevel: { type: Number, default: 0 },
     leftChild: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     rightChild: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     teamSize: { type: Number, default: 0 },
@@ -78,9 +94,6 @@ const userSchema = new mongoose.Schema(
     motherName: { type: String, trim: true },
     dob: Date,
     gender: { type: String, enum: ['male', 'female', 'other'] },
-    bloodGroup: { type: String, trim: true },
-    allergies: { type: String, trim: true },
-    medicalHistory: { type: String, trim: true },
 
     // ========== KYC & ADDRESS ==========
     aadhaarNumber: {
@@ -88,7 +101,7 @@ const userSchema = new mongoose.Schema(
       match: [/^\d{12}$/, 'Aadhaar must be 12 digits'],
       unique: true,
       sparse: true,
-      default: null,
+      default: undefined,
       set: v => (v === '' ? null : v),
     },
     panNumber: {
@@ -97,13 +110,14 @@ const userSchema = new mongoose.Schema(
       uppercase: true,
       unique: true,
       sparse: true,
-      default: null,
+      default: undefined,
       set: v => (v === '' ? null : v),
     },
-    voterId: { type: String, unique: true, sparse: true, trim: true },
-    passportNumber: { type: String, unique: true, sparse: true, trim: true },
     aadhaarImage: String,
     panImage: String,
+    voterId: { type: String, trim: true },
+    passportNumber: { type: String, trim: true },
+
     state: { type: String, trim: true },
     district: { type: String, trim: true },
     block: { type: String, trim: true },
@@ -111,31 +125,15 @@ const userSchema = new mongoose.Schema(
     pincode: { type: String, match: [/^\d{6}$/, 'Pincode must be 6 digits'] },
     fullAddress: { type: String, trim: true },
     profileImage: String,
-    profilePicture: String,   // additional field
     signature: String,
 
-    // ========== EMERGENCY CONTACT ==========
-    emergencyContact: {
-      name: { type: String, trim: true },
-      relationship: { type: String, trim: true },
-      phone: { type: String, trim: true },
-    },
-
     // ========== EDUCATION MODULE ==========
-    // For teachers
     teacherProfile: {
       specialization: { type: String, trim: true },
       qualifications: [String],
       experienceYears: { type: Number, min: 0, default: 0 },
       taughtCourses: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Course' }],
       earnings: { type: Number, default: 0 },
-    },
-    // For students
-    educationProfile: {
-      className: { type: String, trim: true },
-      schoolName: { type: String, trim: true },
-      board: { type: String, trim: true },
-      percentage: { type: String, trim: true },
     },
     enrolledCourses: [
       {
@@ -169,6 +167,12 @@ const userSchema = new mongoose.Schema(
         attendedAt: Date,
       },
     ],
+    educationProfile: {
+      className: String,
+      schoolName: String,
+      board: String,
+      percentage: String,
+    },
 
     // ========== HEALTHCARE MODULE ==========
     doctorProfile: {
@@ -178,19 +182,25 @@ const userSchema = new mongoose.Schema(
       registrationNumber: { type: String, trim: true },
       availableSlots: [Date],
     },
+    doctorVerification: {
+      degreeCertificate: String,
+      medicalCouncilRegNumber: String,
+      registrationCertificate: String,
+      qualification: String,
+      college: String,
+      yearOfPassing: Number,
+      verificationStatus: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected'],
+        default: 'pending',
+      },
+      verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      verificationDate: Date,
+      rejectionReason: String,
+    },
     patients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     appointments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Appointment' }],
-    // Health records as sub‑documents (not references)
-    healthRecords: [
-      {
-        recordType: { type: String, enum: ['lab_report', 'diagnosis', 'vaccination', 'surgery'] },
-        title: String,
-        description: String,
-        fileUrl: String,
-        date: Date,
-        doctorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      },
-    ],
+    healthRecords: [{ type: mongoose.Schema.Types.ObjectId, ref: 'HealthRecord' }],
     prescriptions: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Prescription' }],
 
     // ========== AGRICULTURE MODULE ==========
@@ -199,23 +209,8 @@ const userSchema = new mongoose.Schema(
       crops: [String],
       farmingType: { type: String, enum: ['organic', 'conventional', 'mixed'], default: 'conventional' },
       isContractFarmer: { type: Boolean, default: false },
-      farmLocation: { type: String, trim: true },      // added
-      irrigationType: { type: String, trim: true },    // added
     },
-    // Product listings as sub‑documents (not references)
-    productListings: [
-      {
-        name: String,
-        price: Number,
-        quantity: Number,
-        unit: String,
-        category: String,
-        description: String,
-        imageUrl: String,
-        sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-        createdAt: { type: Date, default: Date.now },
-      },
-    ],
+    productListings: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
     contractFarmingAgreements: [
       {
         buyerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -231,6 +226,7 @@ const userSchema = new mongoose.Schema(
     // ========== FINANCE MODULE ==========
     walletBalance: { type: Number, default: 0, min: 0 },
     totalEarnings: { type: Number, default: 0 },
+    totalIncentiveEarned: { type: Number, default: 0 },
     bankAccount: {
       accountNumber: { type: String, trim: true },
       ifsc: { type: String, trim: true },
@@ -238,7 +234,6 @@ const userSchema = new mongoose.Schema(
       accountHolderName: { type: String, trim: true },
     },
     transactions: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' }],
-    // Loans as sub‑documents
     loans: [
       {
         amount: Number,
@@ -252,31 +247,50 @@ const userSchema = new mongoose.Schema(
     ],
     billPayments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'BillPayment' }],
 
-    // ========== MLM / COMMISSION ==========
-    commissionRate: { type: Number, default: 0, min: 0, max: 100 },
-    totalCommissionEarned: { type: Number, default: 0 },
-    mlmPayoutInfo: {
+    // ========== MODULE EARNINGS ==========
+    moduleEarnings: {
+      education: { type: Number, default: 0 },
+      agriculture: { type: Number, default: 0 },
+      healthcare: { type: Number, default: 0 },
+      finance: { type: Number, default: 0 },
+      license: { type: Number, default: 0 },
+      donation: { type: Number, default: 0 },
+      other: { type: Number, default: 0 },
+    },
+
+    // ========== INCENTIVE PAYOUT INFO ==========
+    incentivePayoutInfo: {
       lastPayoutDate: Date,
       nextPayoutDate: Date,
-      pendingCommission: { type: Number, default: 0, min: 0 },
+      pendingIncentive: { type: Number, default: 0, min: 0 },
       totalWithdrawn: { type: Number, default: 0, min: 0 },
     },
 
-    // ========== SOCIAL MODULE ==========
-    socialProfile: {
-      username: { type: String, trim: true, unique: true, sparse: true },
-      bio: { type: String, trim: true },
-      interests: { type: String, trim: true },
-      followersCount: { type: Number, default: 0 },
-      followingCount: { type: Number, default: 0 },
+    // ========== PAYMENT INFO ==========
+    paymentInfo: {
+      razorpayCustomerId: String,
+      upiId: String,
     },
 
-    // ========== IT MODULE ==========
-    itProfile: {
-      projectType: { type: String, trim: true },
-      techStack: { type: String, trim: true },
-      experience: { type: String, trim: true },
+    // ========== LICENSE SALES TRACKING ==========
+    licenseStats: {
+      totalLicensesSold: { type: Number, default: 0 },
+      monthlyLicensesSold: { type: Number, default: 0 },
+      lastMonthReset: Date,
+      salaryEligible: { type: Boolean, default: false },
     },
+
+    contractStatus: {
+      type: String,
+      enum: ['draft', 'completed', 'rejected'],
+      default: 'draft',
+    },
+    processingFee: { type: Number, default: 0 },
+    securityDeposit: { type: Number, default: 0 },
+    contractCompletedAt: Date,
+    contractRejectionReason: String,
+    contractReviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    contractReviewedAt: Date,
 
     // ========== NEWS & MEDIA MODULE ==========
     mediaCreatorProfile: {
@@ -290,34 +304,6 @@ const userSchema = new mongoose.Schema(
     },
     mediaPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'MediaPost' }],
 
-    // ========== CRM & IT MODULE ==========
-    // Clients and Projects as sub‑documents (controller pushes direct objects)
-    clients: [
-      {
-        name: String,
-        email: String,
-        phone: String,
-        company: String,
-        gstNumber: String,
-        address: String,
-        createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-        createdAt: { type: Date, default: Date.now },
-      },
-    ],
-    projects: [
-      {
-        name: String,
-        description: String,
-        clientId: String,   // can be ObjectId or string
-        startDate: Date,
-        endDate: Date,
-        budget: Number,
-        status: { type: String, default: 'active' },
-        createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-        createdAt: { type: Date, default: Date.now },
-      },
-    ],
-
     // ========== E‑COMMERCE / VILLAGE STORE ==========
     sellerProfile: {
       isSeller: { type: Boolean, default: false },
@@ -326,19 +312,44 @@ const userSchema = new mongoose.Schema(
       storeLogo: String,
       rating: { type: Number, default: 0, min: 0, max: 5 },
     },
-    storeProducts: [
-      {
-        name: String,
-        price: Number,
-        category: String,
-        stock: Number,
-        description: String,
-        imageUrl: String,
-        sellerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-        createdAt: { type: Date, default: Date.now },
-      },
-    ],
+    storeProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'StoreProduct' }],
     exchangeRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'ExchangeRequest' }],
+
+    clients: [{
+      name: String,
+      email: String,
+      phone: String,
+      company: String,
+      gstNumber: String,
+      address: String,
+      createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      createdAt: { type: Date, default: Date.now },
+    }],
+    projects: [{
+      name: String,
+      description: String,
+      clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      startDate: Date,
+      endDate: Date,
+      budget: Number,
+      status: { type: String, enum: ['active', 'completed', 'on-hold'], default: 'active' },
+      createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      createdAt: { type: Date, default: Date.now },
+    }],
+
+    itProfile: {
+      projectType: String,
+      techStack: String,
+      experience: String,
+    },
+
+    socialProfile: {
+      username: String,
+      bio: String,
+      interests: String,
+      followersCount: { type: Number, default: 0 },
+      followingCount: { type: Number, default: 0 },
+    },
 
     // ========== SUBSCRIPTION & OTP ==========
     otp: String,
@@ -355,7 +366,7 @@ const userSchema = new mongoose.Schema(
         startDate: Date,
         endDate: Date,
         amountPaid: Number,
-        transactionId: String,
+        transactionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction' },
       },
     ],
 
@@ -405,8 +416,9 @@ userSchema.index({ lastLogin: -1 });
 userSchema.index({ 'mediaCreatorProfile.isCreator': 1 });
 userSchema.index({ 'sellerProfile.isSeller': 1 });
 userSchema.index({ isDeleted: 1 });
-userSchema.index({ email: 1 });
-userSchema.index({ phone: 1 });
+userSchema.index({ 'doctorVerification.verificationStatus': 1 });
+userSchema.index({ 'licenseStats.totalLicensesSold': 1 });
+userSchema.index({ contractStatus: 1 });
 
 // ========== STATIC METHOD: Generate Unique Referral Code ==========
 userSchema.statics.generateUniqueReferralCode = async function () {
@@ -422,20 +434,15 @@ userSchema.statics.generateUniqueReferralCode = async function () {
 
 // ========== PRE‑SAVE HOOKS ==========
 userSchema.pre('save', async function () {
-  // Hash password if modified
   if (this.isModified('password')) {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
   }
-
-  // Generate unique referral code for new users
   if (this.isNew && !this.referralCode) {
     this.referralCode = await this.constructor.generateUniqueReferralCode();
   }
-
-  // Set hierarchyLevel based on role if not provided
   if (this.isNew && !this.hierarchyLevel) {
-    this.hierarchyLevel = roleLevelMap[this.role] || 9;
+    this.hierarchyLevel = roleLevelMap[this.role] || 12;
   }
 });
 
