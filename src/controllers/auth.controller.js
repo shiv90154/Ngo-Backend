@@ -276,47 +276,47 @@ exports.verifyOTP = async (req, res) => {
     user.otpExpire = null;
     await user.save();
 
-    try { await sendEmail.sendWelcome(user.email, user.fullName); } catch (e) { }
-    // try {
-    //     const certificateResult = await generateCertificate({
-    //       recipientName: user.fullName,
-    //       certificateType: "Membership Certificate",
-    //       issueDate: new Date(),
-    //       state: user.state,
-    //       district: user.district,
-    //       idNumber: user._id.toString(),
-    //       photoPath: user.profileImage,
-    //     });
+    // try { await sendEmail.sendWelcome(user.email, user.fullName); } catch (e) { }
+    try {
+      //     const certificateResult = await generateCertificate({
+      //       recipientName: user.fullName,
+      //       certificateType: "Membership Certificate",
+      //       issueDate: new Date(),
+      //       state: user.state,
+      //       district: user.district,
+      //       idNumber: user._id.toString(),
+      //       photoPath: user.profileImage,
+      //     });
 
-    //     const idCardResult = await generateIdCard({
-    //       name: user.fullName,
-    //       role: user.role,
-    //       phone: user.phone,
-    //       email: user.email,
-    //       photoPath: user.profileImage,
-    //       idNumber: user._id.toString(),
-    //     });
-    //     const attachments = [
-    //       {
-    //         filename: `${user.fullName || "user"}-certificate.pdf`,
-    //         path: certificateResult.filePath,
-    //         contentType: "application/pdf",
-    //       },
-    //       {
-    //         filename: `${user.fullName || "user"}-id-card.pdf`,
-    //         path: idCardResult.filePath,
-    //         contentType: "application/pdf",
-    //       }
-    //     ];
+      const idCardResult = await generateIdCard({
+        name: user.fullName,
+        role: user.role,
+        phone: user.phone,
+        email: user.email,
+        photoPath: user.profileImage,
+        idNumber: user._id.toString(),
+      });
+      const attachments = [
+        //       {
+        //         filename: `${user.fullName || "user"}-certificate.pdf`,
+        //         path: certificateResult.filePath,
+        //         contentType: "application/pdf",
+        //       },
+        {
+          filename: `${user.fullName || "user"}-id-card.pdf`,
+          path: idCardResult.filePath,
+          contentType: "application/pdf",
+        }
+      ];
 
-    //     await sendEmail.sendRegistrationDocuments(
-    //       user.email,
-    //       user.fullName,
-    //       attachments
-    //     );
-    //   } catch (mailErr) {
-    //     console.error("Registration documents email error:", mailErr);
-    //   }
+      await sendEmail.sendRegistrationDocuments(
+        user.email,
+        user.fullName,
+        attachments
+      );
+    } catch (mailErr) {
+      console.error("Registration documents email error:", mailErr);
+    }
     const token = jwt.sign(
       { id: user._id, role: user.role, modules: user.modules },
       process.env.JWT_SECRET,

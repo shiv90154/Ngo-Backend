@@ -191,7 +191,7 @@ const sendRegistrationDocuments = async (email, fullName, attachments = []) => {
   const content = `
     <p>प्रिय <strong>${fullName}</strong>,</p>
     <p>आपका पंजीकरण सफलतापूर्वक हो गया है।</p>
-    <p>आपका <strong>ID Card</strong> और <strong>Certificate</strong> इस ईमेल के साथ PDF के रूप में संलग्न हैं।</p>
+    <p>आपका <strong>ID Card</strong> इस ईमेल के साथ PDF के रूप में संलग्न है।</p>
   `;
 
   const html = wrapInTemplate(content, "✅ पंजीकरण दस्तावेज़");
@@ -199,7 +199,7 @@ const sendRegistrationDocuments = async (email, fullName, attachments = []) => {
   await getTransporter().sendMail({
     from: `"समृद्ध भारत फाउंडेशन" <${process.env.EMAIL_USER}>`,
     to: email,
-    subject: "✅ आपका ID Card और Certificate - समृद्ध भारत फाउंडेशन",
+    subject: "✅ आपका ID Card - समृद्ध भारत फाउंडेशन",
     html,
     attachments,
   });
