@@ -1,0 +1,189 @@
+// backend/src/routes/auth.routes.js
+const express = require('express');
+const router = express.Router();
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+const userController = require('../controllers/auth.controller');
+const User = require('../models/user.model');
+const { protect, restrictTo, rateLimiter } = require('../middleware');
+const {
+  registerValidation,
+  loginValidation,
+  otpValidation,
+  resetPasswordValidation,
+} = require('../validators/authValidator');   // ✅ validation arrays
+
+// Multer setup
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const tempDir = path.join(__dirname, '../../temp_uploads');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    cb(null, tempDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, `${uniqueSuffix}-${file.originalname}`);
+  },
+});
+const upload = multer({ storage });
+
+// ====================== PUBLIC ROUTES ======================
+router.post(
+  '/register',
+  upload.fields([
+    { name: 'profileImage', maxCount: 1 },
+    { name: 'profilePicture', maxCount: 1 },
+    { name: 'aadhaarImage', maxCount: 1 },
+    { name: 'aadharDocument', maxCount: 1 },
+    { name: 'panImage', maxCount: 1 },
+    { name: 'panDocument', maxCount: 1 },
+    { name: 'storeLogo', maxCount: 1 },
+  ]),
+  ...registerValidation,          // ✅ स्प्रेड ज़रूरी है
+  userController.register
+);
+
+// Verify Sponsor Referral Code
+router.get('/verify-sponsor/:code', async (req, res) => {
+  const sponsor = await User.findOne({ referralCode: req.params.code }).select('fullName');
+  if (!sponsor) return res.status(404).json({ success: false, message: 'Invalid referral code' });
+  res.json({ success: true, fullName: sponsor.fullName });
+});
+
+router.post('/verify-otp', ...otpValidation, rateLimiter.otpLimiter, userController.verifyOTP);
+router.post('/resend-otp', ...otpValidation, rateLimiter.otpLimiter, userController.resendOTP);
+router.post('/login', ...loginValidation, rateLimiter.loginLimiter, userController.login);
+router.post('/forgot-password', userController.forgotPassword);
+router.post('/verify-reset-otp', ...otpValidation, userController.verifyResetOtp);
+router.post('/reset-password', ...resetPasswordValidation, userController.resetPassword);
+
+// ====================== PROTECTED ROUTES ======================
+// Profile
+router.get('/profile', protect, userController.getProfile);
+router.put(
+  '/profile',
+  protect,
+  upload.fields([
+    { name: 'profileImage', maxCount: 1 },
+    { name: 'profilePicture', maxCount: 1 },
+    { name: 'storeLogo', maxCount: 1 },
+  ]),
+  userController.updateProfile
+);
+
+// Subordinates – only NGO organizational roles
+router.get('/subordinates', protect, userController.getSubordinates);
+router.get(
+  '/subordinates/:id',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_DEVELOPMENT_COORDINATOR',
+             'DISTRICT_BRANCH_MANAGER', 'DISTRICT_PRESIDENT', 'DISTRICT_FIELD_COORDINATOR',
+             'BLOCK_DEVELOPMENT_COORDINATOR', 'GRAM_DEVELOPMENT_COORDINATOR'),
+  userController.getSubordinates
+);
+
+// Wallet
+router.post('/wallet', protect, userController.updateWallet);
+
+// Health Records
+router.post('/health-records', protect, upload.single('file'), userController.addHealthRecord);
+router.post(
+  '/health-records/user/:userId',
+  protect,
+  restrictTo('BAMS_DOCTOR', 'SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  upload.single('file'),
+  userController.addHealthRecord
+);
+
+// Agriculture Products
+router.post('/products', protect, upload.single('image'), userController.addProductListing);
+
+// Contract Farming
+router.post('/contract-farming', protect, userController.addContractFarming);
+
+// Loans
+router.post('/loans', protect, userController.addLoan);
+router.post(
+  '/loans/user/:userId',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'FINANCE_SERVICE_CONSULTANCY'),
+  userController.addLoan
+);
+
+// CRM Clients
+router.post('/clients', protect, userController.addClient);
+
+// CRM Projects
+router.post('/projects', protect, userController.addProject);
+
+// E-commerce Store Products
+router.post('/store-products', protect, upload.single('image'), userController.addStoreProduct);
+
+// AI Tokens
+router.put('/ai/tokens', protect, restrictTo('SUPER_ADMIN'), userController.updateAITokens);
+router.post('/ai/usage', protect, userController.incrementAIUsage);
+
+// Subscription History
+router.post(
+  '/subscription/history',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  userController.addSubscriptionHistory
+);
+
+// Incentive Payout (renamed from MLM Payout)
+router.put(
+  '/incentive/payout',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  userController.updateIncentivePayout
+);
+
+// Restore user
+router.patch(
+  '/:id/restore',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  userController.restoreUser
+);
+
+// Admin user management
+router.get(
+  '/',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_DEVELOPMENT_COORDINATOR'),
+  userController.getAllUsers
+);
+router.get(
+  '/:id',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_DEVELOPMENT_COORDINATOR'),
+  userController.getUserById
+);
+router.delete(
+  '/:id',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
+  userController.deleteUser
+);
+router.post(
+  '/assign-hierarchy',
+  protect,
+  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR', 'STATE_DEVELOPMENT_COORDINATOR',
+             'DISTRICT_BRANCH_MANAGER', 'DISTRICT_PRESIDENT'),
+  userController.assignReporting
+);
+
+// User search
+router.get('/search', protect, async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).json({ success: false, message: 'Email query required' });
+  const users = await User.find({ email: { $regex: email, $options: 'i' } })
+    .select('fullName email phone role')
+    .limit(5);
+  res.json({ success: true, users });
+});
+
+module.exports = router;
