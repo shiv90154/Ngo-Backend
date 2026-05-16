@@ -33,7 +33,7 @@ const productSaleRoutes = require('./productSale.routes');
 const contractRoutes = require('./contract.routes');
 const meetingRoutes = require('./meeting.routes');                // 🆕 Meetings
 const searchController = require('../controllers/search.controller');
-
+const documentsRoutes = require('./documents.routes');
 // ---------- Health Check ----------
 router.get('/health', (req, res) => {
   res.json({ success: true, message: 'API is running' });
@@ -70,5 +70,6 @@ router.use('/products', productSaleRoutes);
 router.use('/contracts', contractRoutes);
 router.use('/meetings', meetingRoutes);                           // 🆕 Meetings
 router.get('/search', searchController.globalSearch);
+router.use('/documents', documentsRoutes);                     // 🆕 ID Card Routes
 
 module.exports = router;

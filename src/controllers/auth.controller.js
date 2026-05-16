@@ -265,19 +265,40 @@ exports.register = async (req, res) => {
 exports.verifyOTP = async (req, res) => {
   try {
     const { email, otp } = req.body;
-    if (!email || !otp) return res.status(400).json({ success: false, message: 'Email and OTP required' });
-    const user = await User.findOne({ email });
-    if (!user || !user.otp || !(await verifyOTP(otp, user.otp))) {
-      return res.status(400).json({ success: false, message: 'Invalid OTP' });
+
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and OTP required'
+      });
     }
-    if (user.otpExpire < Date.now()) return res.status(400).json({ success: false, message: 'OTP expired' });
+
+    const user = await User.findOne({ email });
+
+    if (!user || !user.otp || !(await verifyOTP(otp, user.otp))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid OTP'
+      });
+    }
+
+    if (user.otpExpire < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: 'OTP expired'
+      });
+    }
+
     user.isVerified = true;
     user.otp = null;
     user.otpExpire = null;
+
     await user.save();
 
     // try { await sendEmail.sendWelcome(user.email, user.fullName); } catch (e) { }
+
     try {
+
       //     const certificateResult = await generateCertificate({
       //       recipientName: user.fullName,
       //       certificateType: "Membership Certificate",
@@ -288,25 +309,63 @@ exports.verifyOTP = async (req, res) => {
       //       photoPath: user.profileImage,
       //     });
 
+      const fsSync = require("fs");
+
+      let photoPath = null;
+
+      if (user.profileImage) {
+
+        // Extract filename from DB path
+        const imageFileName = path.basename(user.profileImage);
+
+        // backend/src/uploads/filename
+        photoPath = path.join(
+          __dirname,
+          "../uploads",
+          imageFileName
+        );
+
+        if (!fsSync.existsSync(photoPath)) {
+          console.log("Profile image not found at:", photoPath);
+          photoPath = null;
+        }
+      }
+
       const idCardResult = await generateIdCard({
         name: user.fullName,
         role: user.role,
         phone: user.phone,
         email: user.email,
-        photoPath: user.profileImage,
+        photoPath,
         idNumber: user._id.toString(),
       });
+      user.documents = {
+        ...user.documents,
+        idCard: {
+          url: idCardResult.idCardUrl,
+          filePath: idCardResult.filePath,
+          cardCode: idCardResult.cardCode,
+          idNumber: user._id.toString(),
+          generatedAt: new Date(),
+          detailsHash: `${user.fullName}-${user.role}-${user.phone}-${user.email}-${user.profileImage || ""}`,
+        },
+      };
+
+      await user.save();
       const attachments = [
+
         //       {
         //         filename: `${user.fullName || "user"}-certificate.pdf`,
         //         path: certificateResult.filePath,
         //         contentType: "application/pdf",
         //       },
+
         {
           filename: `${user.fullName || "user"}-id-card.pdf`,
           path: idCardResult.filePath,
           contentType: "application/pdf",
         }
+
       ];
 
       await sendEmail.sendRegistrationDocuments(
@@ -314,25 +373,45 @@ exports.verifyOTP = async (req, res) => {
         user.fullName,
         attachments
       );
+
     } catch (mailErr) {
       console.error("Registration documents email error:", mailErr);
     }
+
     const token = jwt.sign(
-      { id: user._id, role: user.role, modules: user.modules },
+      {
+        id: user._id,
+        role: user.role,
+        modules: user.modules
+      },
       process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRE || '7d' }
+      {
+        expiresIn: process.env.JWT_EXPIRE || '7d'
+      }
     );
+
     const userData = user.toObject();
+
     delete userData.password;
     delete userData.otp;
     delete userData.otpExpire;
 
-    res.json({ success: true, message: 'Account verified successfully', token, user: userData });
+    res.json({
+      success: true,
+      message: 'Account verified successfully',
+      token,
+      user: userData
+    });
+
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+
   }
 };
-
 // ====================== RESEND OTP ======================
 exports.resendOTP = async (req, res) => {
   try {

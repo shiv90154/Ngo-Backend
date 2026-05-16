@@ -125,6 +125,25 @@ const userSchema = new mongoose.Schema(
     pincode: { type: String, match: [/^\d{6}$/, 'Pincode must be 6 digits'] },
     fullAddress: { type: String, trim: true },
     profileImage: String,
+    memberId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    documents: {
+      idCard: {
+        url: String,
+        filePath: String,
+        cardCode: String,
+        idNumber: String,
+        generatedAt: Date,
+        detailsHash: String,
+        isActive: {
+          type: Boolean,
+          default: true,
+        },
+      },
+    },
     signature: String,
 
     // ========== EDUCATION MODULE ==========

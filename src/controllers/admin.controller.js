@@ -1,4 +1,8 @@
 // backend/src/controllers/admin.controller.js
+const path = require("path");
+const fs = require("fs");
+const { generateIdCard } = require("../services/idCardGenerator");
+
 const User = require('../models/user.model');
 const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/AppError');
@@ -26,7 +30,7 @@ try {
   Client = require('../models/Client');
   Project = require('../models/Project');
   Invoice = require('../models/Invoice');
-} catch (e) {}
+} catch (e) { }
 
 // ---------- DASHBOARD STATS ----------
 exports.getStats = catchAsync(async (req, res) => {
@@ -115,11 +119,45 @@ exports.getUser = catchAsync(async (req, res, next) => {
 
 exports.updateUser = catchAsync(async (req, res, next) => {
   const user = await User.findById(req.params.id);
-  if (!user) return next(new AppError('User not found', 404));
+  if (!user) {
+    return next(new AppError('User not found', 404));
+  }
+  const oldRole = user.role;
   const allowedFields = ['role', 'modules', 'isActive', 'reportsTo', 'sponsorId', 'hierarchyLevel', 'incentivePayoutInfo', 'password'];
-  allowedFields.forEach(field => { if (req.body[field] !== undefined) user[field] = req.body[field]; });
+  allowedFields.forEach(field => { if (req.body[field] !== undefined) { user[field] = req.body[field]; } });
   user.updatedBy = req.user.id;
   await user.save();
+  // AUTO REGENERATE ID CARD
+  if (oldRole !== user.role) {
+    let photoPath = null;
+    if (user.profileImage) {
+      const imageFileName = path.basename(user.profileImage);
+      photoPath = path.join(__dirname, "../uploads", imageFileName);
+      if (!fs.existsSync(photoPath)) { photoPath = null; }
+    }
+
+    // delete old card if exists
+    if (user.documents?.idCard?.filePath && fs.existsSync(user.documents.idCard.filePath)) {
+      fs.unlinkSync(user.documents.idCard.filePath);
+    }
+    if (!user.memberId) {
+      const shortId = user._id.toString().slice(-6).toUpperCase();
+      user.memberId = `SBF${shortId}`;
+    }
+
+    const idCardResult = await generateIdCard({ name: user.fullName, role: user.role, phone: user.phone, email: user.email, photoPath, idNumber: user.memberId, });
+    user.documents = {
+      ...user.documents,
+      idCard: {
+        url: idCardResult.idCardUrl,
+        filePath: idCardResult.filePath,
+        cardCode: idCardResult.cardCode,
+        idNumber: user.memberId,
+        generatedAt: new Date(),
+      },
+    };
+    await user.save();
+  }
   res.json({ success: true, user });
 });
 
