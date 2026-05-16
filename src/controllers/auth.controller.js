@@ -126,7 +126,9 @@ exports.register = async (req, res) => {
       aadhaarNumber: finalAadhaar, panNumber: finalPan, voterId, passportNumber,
       state, district, block, village, pincode, fullAddress,
       otp: hashedOtp, otpExpire: Date.now() + 5 * 60 * 1000,
-      reportsTo: reportsTo || null, sponsorId: resolvedSponsor ? resolvedSponsor._id : null,
+      // 🔧 FIX: Auto‑assign hierarchy parent from sponsor if not provided explicitly
+      reportsTo: reportsTo || (resolvedSponsor ? resolvedSponsor._id : null),
+      sponsorId: resolvedSponsor ? resolvedSponsor._id : null,
       createdBy: req.user ? req.user.id : null, updatedBy: req.user ? req.user.id : null,
       aiUsage: { diseaseDetectionCount: 0, aiTokensRemaining: 10 },
       incentivePayoutInfo: { pendingIncentive: 0, totalWithdrawn: 0 },
