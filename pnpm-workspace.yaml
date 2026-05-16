@@ -1,6 +1,4 @@
-ignoredBuiltDependencies:
+onlyBuiltDependencies:
   - bcrypt
   - phantomjs-prebuilt
-
-onlyBuiltDependencies:
   - puppeteer
