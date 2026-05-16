@@ -197,6 +197,39 @@ exports.getSubordinates = catchAsync(async (req, res, next) => {
   res.json({ success: true, subordinates: subs });
 });
 
+/**
+ * NEW: Get hierarchy tree rooted at a specific user
+ */
+exports.getUserHierarchy = catchAsync(async (req, res, next) => {
+  const rootUser = await User.findById(req.params.id)
+    .select('fullName role email phone state district block teamSize reportsTo')
+    .lean();
+
+  if (!rootUser) {
+    return next(new AppError('User not found', 404));
+  }
+
+  const fetchChildren = async (parentId) => {
+    const children = await User.find({ reportsTo: parentId, isDeleted: false })
+      .select('fullName role email phone state district block teamSize reportsTo')
+      .lean();
+
+    return Promise.all(
+      children.map(async (child) => ({
+        ...child,
+        children: await fetchChildren(child._id),
+      }))
+    );
+  };
+
+  const tree = {
+    ...rootUser,
+    children: await fetchChildren(rootUser._id),
+  };
+
+  res.json({ success: true, hierarchy: tree });
+});
+
 // ---------- SETTINGS ----------
 exports.getSettings = catchAsync(async (req, res) => {
   const settings = await Setting.find();

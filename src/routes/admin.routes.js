@@ -10,11 +10,6 @@ const ADMIN_ROLES = [
   'ADDITIONAL_DIRECTOR',
 ];
 
-// ─────────────────────────────────────────────
-// DEBUG
-// ─────────────────────────────────────────────
-console.log('getCommissionSplits =>', typeof adminController.getCommissionSplits);
-console.log('updateCommissionSplit =>', typeof adminController.updateCommissionSplit);
 
 // ─────────────────────────────────────────────
 // PUBLIC ROUTES
@@ -42,6 +37,10 @@ router.get('/stats', adminController.getStats);
 router.post('/users', adminController.createUser);
 router.get('/users', adminController.getUsers);
 router.get('/users/export/csv', adminController.exportUsers);
+
+// NEW: Get hierarchy for a specific user (subtree)
+router.get('/users/:id/hierarchy', adminController.getUserHierarchy);
+
 router.get('/users/:id', adminController.getUser);
 router.put('/users/:id', adminController.updateUser);
 router.patch('/users/:id/toggle-active', adminController.toggleActive);
