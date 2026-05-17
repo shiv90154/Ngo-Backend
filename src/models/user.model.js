@@ -12,7 +12,7 @@ const roleLevelMap = {
   BAMS_DOCTOR: 5,
   BLOCK_DEVELOPMENT_COORDINATOR: 6,
   GRAM_DEVELOPMENT_COORDINATOR: 7,
-  NGO_CLUB: 8,                    // 🆕
+  NGO_CLUB: 8,                   
   IT_DEVELOPER: 10,
   TEACHER: 10,
   NEWS_EDITOR: 10,

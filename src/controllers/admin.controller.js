@@ -51,7 +51,9 @@ exports.getStats = catchAsync(async (req, res) => {
     Enrollment.countDocuments().catch(() => 0),
     LicenseType.countDocuments({ isActive: true }),
     ProductSale.countDocuments(),
-    User.find().sort('-createdAt').limit(5).select('fullName email role createdAt')
+    User.find().sort('-createdAt').limit(5)
+      .select('fullName email role createdAt sponsorId')
+      .populate('sponsorId', 'fullName')           // ← NOW INCLUDES SPONSOR NAME
   ]);
   res.json({
     success: true,
@@ -170,11 +172,26 @@ exports.toggleActive = catchAsync(async (req, res, next) => {
 });
 
 exports.deleteUser = catchAsync(async (req, res, next) => {
+  const { hardDelete } = req.query;
   const user = await User.findById(req.params.id);
   if (!user) return next(new AppError('User not found', 404));
-  user.isDeleted = true; user.deletedAt = new Date(); user.isActive = false;
-  await user.save();
-  res.json({ success: true, message: 'User deactivated' });
+
+  if (hardDelete === 'true') {
+    // Permanent delete
+    if (user.profileImage) {
+      const imagePath = path.join(__dirname, '../', user.profileImage);
+      fs.unlink(imagePath, () => {});   // ignore errors
+    }
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'User permanently deleted' });
+  } else {
+    // Soft delete (deactivate)
+    user.isDeleted = true;
+    user.deletedAt = new Date();
+    user.isActive = false;
+    await user.save();
+    res.json({ success: true, message: 'User deactivated (soft delete)' });
+  }
 });
 
 // ---------- HIERARCHY (FIXED) ----------
@@ -197,9 +214,6 @@ exports.getSubordinates = catchAsync(async (req, res, next) => {
   res.json({ success: true, subordinates: subs });
 });
 
-/**
- * NEW: Get hierarchy tree rooted at a specific user
- */
 exports.getUserHierarchy = catchAsync(async (req, res, next) => {
   const rootUser = await User.findById(req.params.id)
     .select('fullName role email phone state district block teamSize reportsTo')

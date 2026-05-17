@@ -12,13 +12,13 @@ const ADMIN_ROLES = [
 
 
 // ─────────────────────────────────────────────
-// PUBLIC ROUTES
+// PUBLIC ROUTES (only require login)
 // ─────────────────────────────────────────────
-router.get(
-  '/licenses/types',
-  protect,
-  adminController.getLicenseTypes
-);
+router.get('/licenses/types', protect, adminController.getLicenseTypes);
+
+// 🌐 Full organisation hierarchy – any authenticated user
+router.get('/hierarchy', protect, adminController.getHierarchy);
+
 
 // ─────────────────────────────────────────────
 // ADMIN MIDDLEWARE
@@ -63,19 +63,15 @@ router.get('/logs', adminController.getLogs);
 router.get('/module/:module', adminController.getModuleData);
 
 // ─────────────────────────────────────────────
-// HIERARCHY
+// HIERARCHY (these remain admin‑only)
 // ─────────────────────────────────────────────
-router.get('/hierarchy', adminController.getHierarchy);
 router.get('/subordinates', adminController.getSubordinates);
 router.get('/subordinates/:id', adminController.getSubordinates);
 
 // ─────────────────────────────────────────────
 // GLOBAL NOTIFICATIONS
 // ─────────────────────────────────────────────
-router.post(
-  '/notifications/send',
-  adminController.sendGlobalNotification
-);
+router.post('/notifications/send', adminController.sendGlobalNotification);
 
 // ─────────────────────────────────────────────
 // LICENSE TYPES
@@ -87,10 +83,7 @@ router.delete('/licenses/types/:id', adminController.deleteLicenseType);
 // ─────────────────────────────────────────────
 // LICENSE PURCHASES
 // ─────────────────────────────────────────────
-router.get(
-  '/licenses/purchases/all',
-  adminController.getAllLicensePurchases
-);
+router.get('/licenses/purchases/all', adminController.getAllLicensePurchases);
 
 // ─────────────────────────────────────────────
 // COMMISSION SPLITS
@@ -111,69 +104,31 @@ router.get(
 // ─────────────────────────────────────────────
 // EDUCATION PROGRAMS
 // ─────────────────────────────────────────────
-router.get(
-  '/education-programs',
-  adminController.getEducationPrograms
-);
-
-router.put(
-  '/education-programs/:id',
-  adminController.updateEducationProgram
-);
+router.get('/education-programs', adminController.getEducationPrograms);
+router.put('/education-programs/:id', adminController.updateEducationProgram);
 
 // ─────────────────────────────────────────────
 // MEETINGS
 // ─────────────────────────────────────────────
 router.get('/meetings/all', adminController.getAllMeetings);
-
-router.patch(
-  '/meetings/:id/status',
-  adminController.updateMeetingStatus
-);
+router.patch('/meetings/:id/status', adminController.updateMeetingStatus);
 
 // ─────────────────────────────────────────────
 // PI SHARES
 // ─────────────────────────────────────────────
-router.get(
-  '/pi-shares',
-  restrictTo('SUPER_ADMIN'),
-  adminController.getPIShares
-);
-
-router.post(
-  '/pi-shares',
-  restrictTo('SUPER_ADMIN'),
-  adminController.createPIShare
-);
-
-router.put(
-  '/pi-shares/:id',
-  restrictTo('SUPER_ADMIN'),
-  adminController.updatePIShare
-);
-
-router.delete(
-  '/pi-shares/:id',
-  restrictTo('SUPER_ADMIN'),
-  adminController.deletePIShare
-);
+router.get('/pi-shares', restrictTo('SUPER_ADMIN'), adminController.getPIShares);
+router.post('/pi-shares', restrictTo('SUPER_ADMIN'), adminController.createPIShare);
+router.put('/pi-shares/:id', restrictTo('SUPER_ADMIN'), adminController.updatePIShare);
+router.delete('/pi-shares/:id', restrictTo('SUPER_ADMIN'), adminController.deletePIShare);
 
 // ─────────────────────────────────────────────
 // PAYMENTS
 // ─────────────────────────────────────────────
-router.get(
-  '/payments',
-  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
-  adminController.getAllPayments
-);
+router.get('/payments', restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adminController.getAllPayments);
 
 // ─────────────────────────────────────────────
 // PI TRANSACTIONS
 // ─────────────────────────────────────────────
-router.get(
-  '/pi-transactions',
-  restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'),
-  adminController.getPITransactions
-);
+router.get('/pi-transactions', restrictTo('SUPER_ADMIN', 'ADDITIONAL_DIRECTOR'), adminController.getPITransactions);
 
 module.exports = router;

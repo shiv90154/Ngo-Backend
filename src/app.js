@@ -7,9 +7,7 @@ const { errorHandler, notFound } = require('./middleware');
 
 const app = express();
 
-// ──────────────────────────────────────────────
-// 1. ALLOWED ORIGINS – sare environments cover
-// ──────────────────────────────────────────────
+
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
@@ -24,7 +22,7 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true);   // Postman, curl, etc.
+    if (!origin) return callback(null, true);   
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -38,17 +36,13 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-// ❌ Express 5 me `app.options('*', ...)` galat hai – remove it.
 
-// ──────────────────────────────────────────────
-// 2. Raw body for webhooks (e.g. Razorpay)
-// ──────────────────────────────────────────────
 app.use('/api/finance/webhooks/razorpay', express.raw({ type: 'application/json' }));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Uploads folder
+
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
